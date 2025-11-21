@@ -12,15 +12,14 @@ import os
 from unittest.mock import MagicMock, patch
 import pytest
 
-# Add parent and src directory to path
+# Add parent and 'src' directory to path
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-src_dir = os.path.join(parent_dir, 'src')
+source_dir = os.path.join(parent_dir, 'src')
 sys.path.insert(0, parent_dir)
-sys.path.insert(0, src_dir)
+sys.path.insert(0, source_dir)
 
 # Import our mock module
 import machine_mock
-
 
 def pytest_configure(config):
     """
@@ -40,7 +39,6 @@ def pytest_configure(config):
         "markers", "slow: marks tests as slow running"
     )
 
-
 @pytest.fixture(autouse=True)
 def reset_mock_tracking():
     """
@@ -57,7 +55,6 @@ def reset_mock_tracking():
     # Reset after test
     machine_mock.reset_all_tracking()
 
-
 @pytest.fixture
 def mock_time_sleep():
     """
@@ -71,7 +68,6 @@ def mock_time_sleep():
     """
     with patch('time.sleep') as mock_sleep:
         yield mock_sleep
-
 
 @pytest.fixture
 def motor_instance():
@@ -95,7 +91,6 @@ def motor_instance():
 
     return motor
 
-
 @pytest.fixture
 def verbose_motor_instance():
     """
@@ -115,7 +110,6 @@ def verbose_motor_instance():
     machine_mock.reset_all_tracking()
 
     return motor
-
 
 @pytest.fixture
 def capture_operations():
@@ -162,7 +156,6 @@ def capture_operations():
 
     return get_categorized_ops
 
-
 # Optional: Add custom pytest options
 def pytest_addoption(parser):
     """Add custom command line options."""
@@ -178,7 +171,6 @@ def pytest_addoption(parser):
         default=False,
         help="enable verbose motor logging during tests"
     )
-
 
 def pytest_collection_modifyitems(config, items):
     """Modify test collection based on markers and options."""
