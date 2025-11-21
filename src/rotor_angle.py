@@ -24,7 +24,9 @@ class RotorAngle:
 
     To avoid floating-point error accumulation, the position within a sector is
     stored using fixed precision. Each sector is subdivided into `SECTOR_TICKS`
-    discrete integer ticks.
+    discrete integer ticks. 'SECTOR_TICKS' must be a power of 2 - this help with
+    implementing micro-stepping, because a full step gets split into a number of
+    micro-steps which is itself a power of 2 (# micro-steps <= SECTOR_TICKS).
 
     Therefore, an angle is represented as a tuple: (sector, ticks)
     where:
@@ -47,7 +49,7 @@ class RotorAngle:
         SECTOR_SIZE: float
             The size of each sector in degrees.
 
-        SECTOR_TICKS: int
+        SECTOR_TICKS: int, positive, a power of 2
             The number of discrete ticks within each sector for precision.
 
         TOTAL_TICKS: int
@@ -114,9 +116,23 @@ class RotorAngle:
     FULL_STEPS_PER_REV = 200                          # the number of full steps the rotor needs to complete a revolution
     SECTOR_COUNT       = FULL_STEPS_PER_REV           # the number of sectors into which we partition the circle
     SECTOR_SIZE        = 360 / SECTOR_COUNT           # the size of a sector, in degrees
-    SECTOR_TICKS       = 64800                        # the number of discrete ticks into which we divide a sector
+    SECTOR_TICKS       = 2^16                         # number of ticks into which we divide a sector (must be a power of 2)
     TOTAL_TICKS        = SECTOR_COUNT * SECTOR_TICKS  # the total number of discrete ticks around the complete circle
 
+    @staticmethod
+    def is_power_of_2(n):
+        """
+        Check wheter a positive integer is a positive power of two.
+        """
+        if not isinstance(n, int) or n < 0:
+            return False
+        
+        # Common trick for testing if power of 2:
+        # iff a power of two, binary representation of 'n' contains
+        # only one '1'; the binary representation of 'n-1' flips all 
+        # bits and shifts them => bitwise AND gives all 0s.
+        return n & (n-1) == 0 
+    
     def __init__(self, sector=1, ticks=0):
         """
         Initialize a RotorAngle.
@@ -125,6 +141,8 @@ class RotorAngle:
             sector: int - sector number (1-based) [1, FULL_STEPS_PER_REV]
             ticks : int - position within sector  [0, SECTOR_RESOLUTION)
         """
+        assert RotorAngle.is_power_of_2(RotorAngle.SECTOR_COUNT), \
+            f"RotorAngle.SECTOR_COUNT must be a power of 2, got {RotorAngle.SECTOR_COUNT}"        
         assert 1 <= sector <= RotorAngle.SECTOR_COUNT, \
             f"sector must be in [1, {RotorAngle.SECTOR_COUNT}], got {sector}"
         assert 0 <= ticks < RotorAngle.SECTOR_TICKS, \
