@@ -116,7 +116,7 @@ class RotorAngle:
     FULL_STEPS_PER_REV = 200                          # the number of full steps the rotor needs to complete a revolution
     SECTOR_COUNT       = FULL_STEPS_PER_REV           # the number of sectors into which we partition the circle
     SECTOR_SIZE        = 360 / SECTOR_COUNT           # the size of a sector, in degrees
-    SECTOR_TICKS       = 2^16                         # number of ticks into which we divide a sector (must be a power of 2)
+    SECTOR_TICKS       = 2**16                        # number of ticks into which we divide a sector (must be a power of 2)
     TOTAL_TICKS        = SECTOR_COUNT * SECTOR_TICKS  # the total number of discrete ticks around the complete circle
 
     @staticmethod
@@ -141,8 +141,8 @@ class RotorAngle:
             sector: int - sector number (1-based) [1, FULL_STEPS_PER_REV]
             ticks : int - position within sector  [0, SECTOR_RESOLUTION)
         """
-        assert RotorAngle.is_power_of_2(RotorAngle.SECTOR_COUNT), \
-            f"RotorAngle.SECTOR_COUNT must be a power of 2, got {RotorAngle.SECTOR_COUNT}"        
+        assert RotorAngle.is_power_of_2(RotorAngle.SECTOR_TICKS), \
+            f"RotorAngle.SECTOR_TICKS must be a power of 2, got {RotorAngle.SECTOR_TICKS}"        
         assert 1 <= sector <= RotorAngle.SECTOR_COUNT, \
             f"sector must be in [1, {RotorAngle.SECTOR_COUNT}], got {sector}"
         assert 0 <= ticks < RotorAngle.SECTOR_TICKS, \
