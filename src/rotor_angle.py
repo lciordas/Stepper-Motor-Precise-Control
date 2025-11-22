@@ -20,7 +20,7 @@ class RotorAngle:
 
     We choose to represent an angle as a pair (sector, position_within_sector)
     because this structure aligns naturally with how the control software interacts
-    with the motor (see class 'MicrostepperMotor' for how the current class is used).
+    with the motor (see class 'StepperMotor' for how the current class is used).
 
     To avoid floating-point error accumulation, the position within a sector is
     stored using fixed precision. Each sector is subdivided into `SECTOR_TICKS`

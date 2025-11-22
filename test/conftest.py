@@ -78,9 +78,9 @@ def motor_instance():
         def test_something(motor_instance):
             motor_instance.spin_rotor(1, 60, "cw")
     """
-    from microstepper import MicrostepMotor
+    from stepper_motor import StepperMotor
 
-    motor = MicrostepMotor(
+    motor = StepperMotor(
         ain1=0, ain2=1, pwma=2,
         bin1=3, bin2=4, pwmb=5,
         verbose=False
@@ -98,9 +98,9 @@ def verbose_motor_instance():
 
     Useful for debugging tests.
     """
-    from microstepper import MicrostepMotor
+    from stepper_motor import StepperMotor
 
-    motor = MicrostepMotor(
+    motor = StepperMotor(
         ain1=0, ain2=1, pwma=2,
         bin1=3, bin2=4, pwmb=5,
         verbose=True

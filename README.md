@@ -15,11 +15,11 @@ A MicroPython library for controlling bipolar stepper motors with microstepping 
 ```
 stepper/
 ├── src/                       # Source code (deploy to Pico 2)
-│   ├── microstepper.py        # Main motor control class
+│   ├── stepper_motor.py       # Main motor control class
 │   └── rotor_angle.py         # Rotor angle calculations
 ├── test/                      # Test code (local development only)
 │   ├── machine_mock.py        # Mock MicroPython machine module
-│   ├── test_microstepper.py   # Unit tests
+│   ├── test_stepper_motor.py  # Unit tests
 │   ├── test_example.py        # Example/demo script
 │   └── conftest.py            # pytest configuration
 ├── README.md                  # This file
@@ -31,16 +31,16 @@ stepper/
 ### Copying files to your MicroPython device
 
 1. Copy **only** the files from `src/` to your Pico 2:
-   - `microstepper.py`
+   - `stepper_motor.py`
    - `rotor_angle.py`
 
 2. On your Pico 2, import and use:
 
 ```python
-from microstepper import MicrostepMotor
+from stepper_motor import StepperMotor
 
 # Initialize motor with pin connections
-motor = MicrostepMotor(
+motor = StepperMotor(
     ain1=0, ain2=1, pwma=2,  # Phase A pins
     bin1=3, bin2=4, pwmb=5,  # Phase B pins
     verbose=True             # Enable debug logging
@@ -100,7 +100,7 @@ The library assumes:
 
 ## API Reference
 
-### MicrostepMotor Class
+### StepperMotor Class
 
 #### `__init__(ain1, ain2, pwma, bin1, bin2, pwmb, verbose=False)`
 Initialize the motor controller.

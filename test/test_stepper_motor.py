@@ -1,5 +1,5 @@
 """
-Unit tests for MicrostepMotor class.
+Unit tests for StepperMotor class.
 
 These tests use mock hardware to verify motor control 
 logic without requiring actual MicroPython hardware.
@@ -15,16 +15,16 @@ source_dir = os.path.join(parent_dir, 'src')
 sys.path.insert(0, parent_dir)
 sys.path.insert(0, source_dir)
 
-# Before importing microstepper, replace machine module with our mock
+# Before importing stepper_motor, replace machine module with our mock
 import machine_mock
 sys.modules['machine'] = machine_mock
 
 # We can only now import the modules that import the 'machine' module
-from microstepper import MicrostepMotor
+from stepper_motor import StepperMotor
 from rotor_angle  import RotorAngle
 
 
-class TestMicrostepMotorInitialization:
+class TestStepperMotorInitialization:
     """Test motor initialization and basic properties."""
 
     def setup_method(self):
@@ -33,7 +33,7 @@ class TestMicrostepMotorInitialization:
 
     def test_initialization_creates_pins_and_pwm(self):
         """Test that initialization properly sets up all pins and PWM controllers."""
-        motor = MicrostepMotor(
+        motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -53,7 +53,7 @@ class TestMicrostepMotorInitialization:
 
     def test_initialization_aligns_rotor(self):
         """Test that motor starts with rotor aligned to position 1."""
-        motor = MicrostepMotor(
+        motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -67,7 +67,7 @@ class TestMicrostepMotorInitialization:
 
     def test_initialization_energizes_phase_a(self):
         """Test that initialization energizes Phase A positively."""
-        motor = MicrostepMotor(
+        motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -99,7 +99,7 @@ class TestRotorAlignment:
     def setup_method(self):
         """Create motor instance and reset tracking for each test."""
         machine_mock.reset_all_tracking()
-        self.motor = MicrostepMotor(
+        self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -121,7 +121,7 @@ class TestRotorAlignment:
         ops_after = machine_mock.get_all_operations()
         assert ops_before == ops_after
 
-    @patch('microstepper.MicrostepMotor.is_aligned', new_callable=lambda: property(lambda self: False))
+    @patch('stepper_motor.StepperMotor.is_aligned', new_callable=lambda: property(lambda self: False))
     def test_align_rotor_clockwise(self, mock_aligned):
         """Test clockwise alignment from unaligned position."""
         # Set rotor to unaligned position (middle of sector 2)
@@ -141,7 +141,7 @@ class TestSectorRotation:
     def setup_method(self):
         """Create motor instance for each test."""
         machine_mock.reset_all_tracking()
-        self.motor = MicrostepMotor(
+        self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -153,7 +153,7 @@ class TestSectorRotation:
         initial_sector = self.motor.rotor_angle.sector
 
         # Rotate 5 sectors clockwise
-        self.motor._rotate_sectors(5, 0.01)
+        self.motor._rotate_sectors(5, 0.01, 1)
 
         # Check final position
         expected_sector = (initial_sector + 5 - 1) % RotorAngle.SECTOR_COUNT + 1
@@ -169,7 +169,7 @@ class TestSectorRotation:
         initial_sector = self.motor.rotor_angle.sector
 
         # Rotate 3 sectors counter-clockwise
-        self.motor._rotate_sectors(-3, 0.01)
+        self.motor._rotate_sectors(-3, 0.01, 1)
 
         # Check final position
         expected_sector = (initial_sector - 3 - 1) % RotorAngle.SECTOR_COUNT + 1
@@ -185,7 +185,7 @@ class TestSectorRotation:
         initial_sector = self.motor.rotor_angle.sector
 
         # Rotate 0 sectors
-        self.motor._rotate_sectors(0, 0.01)
+        self.motor._rotate_sectors(0, 0.01, 1)
 
         # Position should not change
         assert self.motor.rotor_angle.sector == initial_sector
@@ -201,7 +201,7 @@ class TestSectorRotation:
         mock_sleep.side_effect = [None, None, None, KeyboardInterrupt()]
 
         with pytest.raises(KeyboardInterrupt):
-            self.motor._rotate_sectors(inf, 0.01)
+            self.motor._rotate_sectors(inf, 0.01, 1)
 
         # Should have rotated at least 3 times before interrupt
         assert mock_sleep.call_count == 4
@@ -213,7 +213,7 @@ class TestMicrostepPositioning:
     def setup_method(self):
         """Create motor instance for each test."""
         machine_mock.reset_all_tracking()
-        self.motor = MicrostepMotor(
+        self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -274,15 +274,15 @@ class TestSpinRotor:
     def setup_method(self):
         """Create motor instance for each test."""
         machine_mock.reset_all_tracking()
-        self.motor = MicrostepMotor(
+        self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
         )
 
     @patch('time.sleep')
-    @patch.object(MicrostepMotor, 'align_rotor')
-    @patch.object(MicrostepMotor, '_rotate_sectors')
+    @patch.object(StepperMotor, 'align_rotor')
+    @patch.object(StepperMotor, '_rotate_sectors')
     def test_spin_rotor_basic(self, mock_rotate, mock_align, mock_sleep):
         """Test basic spin functionality."""
         # Spin 2.5 revolutions at 60 RPM clockwise
@@ -294,16 +294,16 @@ class TestSpinRotor:
         # Verify rotation was called with correct parameters
         # 2.5 revolutions = 2.5 * 200 sectors = 500 sectors (rounded)
         # Delay = 60 / (200 * 60) = 0.005 seconds
-        mock_rotate.assert_called_once_with(500, 0.005)
+        mock_rotate.assert_called_once_with(500, 0.005, 1)
 
     @patch('time.sleep')
-    @patch.object(MicrostepMotor, '_rotate_sectors')
+    @patch.object(StepperMotor, '_rotate_sectors')
     def test_spin_rotor_zero_revolutions(self, mock_rotate, mock_sleep):
         """Test that spinning 0 revolutions works correctly."""
         self.motor.spin_rotor(0, 60, "cw")
 
         # Should call rotate with 0 sectors
-        mock_rotate.assert_called_with(0, 0.005)
+        mock_rotate.assert_called_with(0, 0.005, 1)
 
 
 class TestSetRotor:
@@ -312,7 +312,7 @@ class TestSetRotor:
     def setup_method(self):
         """Create motor instance for each test."""
         machine_mock.reset_all_tracking()
-        self.motor = MicrostepMotor(
+        self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -335,9 +335,9 @@ class TestSetRotor:
         assert len(ops['pwm_operations']) == 0
 
     @patch('time.sleep')
-    @patch.object(MicrostepMotor, 'align_rotor')
-    @patch.object(MicrostepMotor, '_rotate_sectors')
-    @patch.object(MicrostepMotor, '_rotate_in_sector')
+    @patch.object(StepperMotor, 'align_rotor')
+    @patch.object(StepperMotor, '_rotate_sectors')
+    @patch.object(StepperMotor, '_rotate_in_sector')
     def test_set_rotor_different_sector(self, mock_rotate_in, mock_rotate_sectors, mock_align, mock_sleep):
         """Test positioning to a different sector."""
         # Position to 45 degrees
@@ -382,7 +382,7 @@ class TestEnergizePhase:
     def setup_method(self):
         """Create motor instance for each test."""
         machine_mock.reset_all_tracking()
-        self.motor = MicrostepMotor(
+        self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False

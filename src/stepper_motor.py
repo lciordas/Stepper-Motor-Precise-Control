@@ -5,7 +5,7 @@ import time
 from electric_cycle import calculate_electric_cycle, calculate_currents_sinusoidal
 from rotor_angle    import RotorAngle
 
-class MicrostepMotor:
+class StepperMotor:
     """
     This interface controls a two-phase bipolar stepper motor.
 
@@ -105,10 +105,10 @@ class MicrostepMotor:
         """
         # The max number of micro-steps into which we can break a full step must
         # be a power of 2 and cannot larger than the number of ticks in a sector.
-        assert RotorAngle.is_power_of_2(MicrostepMotor.MAX_MICROSTEPS),\
-            f"MicrostepMotor.MAX_MICROSTEPS must be a power of 2, got {MicrostepMotor.MAX_MICROSTEPS}" 
-        assert MicrostepMotor.MAX_MICROSTEPS <= RotorAngle.SECTOR_TICKS,\
-            f"MicrostepMotor.MAX_MICROSTEPS cannot be larger than RotorAngle.SECTOR_TICKS"
+        assert RotorAngle.is_power_of_2(StepperMotor.MAX_MICROSTEPS),\
+            f"StepperMotor.MAX_MICROSTEPS must be a power of 2, got {StepperMotor.MAX_MICROSTEPS}"
+        assert StepperMotor.MAX_MICROSTEPS <= RotorAngle.SECTOR_TICKS,\
+            f"StepperMotor.MAX_MICROSTEPS cannot be larger than RotorAngle.SECTOR_TICKS"
         
         self._verbose = verbose
 
@@ -117,12 +117,12 @@ class MicrostepMotor:
         self.ain1 = Pin(ain1, Pin.OUT)
         self.ain2 = Pin(ain2, Pin.OUT)
         self.pwma = PWM(Pin(pwma))        
-        self.pwma.freq(MicrostepMotor.PWM_FREQUENCY)
+        self.pwma.freq(StepperMotor.PWM_FREQUENCY)
         # -- Phase B    
         self.bin1 = Pin(bin1, Pin.OUT)
         self.bin2 = Pin(bin2, Pin.OUT)
         self.pwmb = PWM(Pin(pwmb))
-        self.pwmb.freq(MicrostepMotor.PWM_FREQUENCY)
+        self.pwmb.freq(StepperMotor.PWM_FREQUENCY)
 
         # Energize the motor and turn the rotor such
         # that one tooth aligns with the top pole.
@@ -143,7 +143,7 @@ class MicrostepMotor:
                               ('A', -1),  # fully energize (negatively) Phase A, Phase B is off
                               ('B', -1))  # fully energize (negatively) Phase B, Phase A is off
 
-        self.electric_cycle = calculate_electric_cycle(MicrostepMotor.MAX_MICROSTEPS, calculate_currents_sinusoidal)
+        self.electric_cycle = calculate_electric_cycle(StepperMotor.MAX_MICROSTEPS, calculate_currents_sinusoidal)
 
         # Log debugging information if needed
         self.log(f"\nMotor initialized")
@@ -367,8 +367,8 @@ class MicrostepMotor:
         # The number of micro-steps must be a power of two and cannot exceed 'MAX_MICROSTEPS'.
         assert RotorAngle.is_power_of_2(num_microsteps),\
             f"The 'num_microsteps' argument must be a power of 2."
-        assert num_microsteps <= MicrostepMotor.MAX_MICROSTEPS,\
-            f"The 'num_microsteps' argument cannot exceed 'MicrostepMotor.MAX_MICROSTEPS'."
+        assert num_microsteps <= StepperMotor.MAX_MICROSTEPS,\
+            f"The 'num_microsteps' argument cannot exceed 'StepperMotor.MAX_MICROSTEPS'."
         assert direction in ('cw', 'ccw')
         assert self.is_aligned   # this method may only be used with an aligned rotor
 
@@ -381,15 +381,15 @@ class MicrostepMotor:
         current_sector   = self.rotor_angle.sector
         starting_quarter = ((current_sector - 1) % 4) + 1  # 1-4
 
-        # Calculate the offset in the 'electric_cycle' array due to 
+        # Calculate the offset in the 'electric_cycle' array due to
         # which quarter of the electric cycle we are currently in.
-        # The array has 4 * MAX_MICROSTEPS entries for one complete 
+        # The array has 4 * MAX_MICROSTEPS entries for one complete
         # electrical cycle => each quarter has MAX_MICROSTEPS entries.
-        offset = (starting_quarter - 1) * MicrostepMotor.MAX_MICROSTEPS
+        offset = (starting_quarter - 1) * StepperMotor.MAX_MICROSTEPS
 
         # Calculate how many entries to skip in the 'electric_cycle'
         # array when using fewer microsteps than MAX_MICROSTEPS.
-        stride = MicrostepMotor.MAX_MICROSTEPS // num_microsteps
+        stride = StepperMotor.MAX_MICROSTEPS // num_microsteps
 
         # Rotate one microstep at a time.
         for microstep in range(num_microsteps):

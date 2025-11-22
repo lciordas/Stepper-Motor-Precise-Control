@@ -1,4 +1,4 @@
-# Testing microstepper.py Without MicroPython Hardware
+# Testing stepper_motor.py Without MicroPython Hardware
 
 This project contains a complete testing framework that allows you to test the stepper motor control logic without requiring MicroPython or actual hardware.
 
@@ -7,11 +7,11 @@ This project contains a complete testing framework that allows you to test the s
 ```
 stepper/
 ├── src/                       # Source code (for Pico 2)
-│   ├── microstepper.py        # Main motor control class
+│   ├── stepper_motor.py       # Main motor control class
 │   └── rotor_angle.py         # Rotor angle calculations
 ├── test/                      # Test code (local only)
 │   ├── machine_mock.py        # Mock MicroPython machine module
-│   ├── test_microstepper.py   # Unit tests
+│   ├── test_stepper_motor.py  # Unit tests
 │   ├── test_example.py        # Example/demo script
 │   └── conftest.py            # pytest configuration
 └── README_TESTING.md          # This file
@@ -31,12 +31,12 @@ pip install pytest
 python3 -m pytest test/ -v
 
 # Or specifically the microstepper tests
-python3 -m pytest test/test_microstepper.py -v
+python3 -m pytest test/test_stepper_motor.py -v
 ```
 
 ### Run Specific Test Class
 ```bash
-python3 -m pytest test/test_microstepper.py::TestSectorRotation -v
+python3 -m pytest test/test_stepper_motor.py::TestSectorRotation -v
 ```
 
 ### Run Manual Example
@@ -54,7 +54,7 @@ from test import machine_mock
 sys.modules['machine'] = machine_mock
 
 # Now we can import from src without hardware
-from src.microstepper import MicrostepMotor
+from src.stepper_motor import StepperMotor
 from src.rotor_angle import RotorAngle
 ```
 
@@ -110,7 +110,7 @@ The test suite includes:
 
 To add new tests:
 
-1. Create a test class in `test_microstepper.py`
+1. Create a test class in `test_stepper_motor.py`
 2. Use `setup_method` to initialize the motor
 3. Use pytest fixtures from `conftest.py`
 4. Mock `time.sleep` for fast execution
@@ -120,7 +120,7 @@ Example:
 class TestNewFeature:
     def setup_method(self):
         machine_mock.reset_all_tracking()
-        self.motor = MicrostepMotor(
+        self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
             bin1=3, bin2=4, pwmb=5,
             verbose=False
@@ -142,7 +142,7 @@ To debug failing tests:
 
 1. **Enable verbose motor output:**
    ```python
-   motor = MicrostepMotor(..., verbose=True)
+   motor = StepperMotor(..., verbose=True)
    ```
 
 2. **Print tracked operations:**
@@ -152,12 +152,12 @@ To debug failing tests:
 
 3. **Use pytest's -s flag to see print statements:**
    ```bash
-   python3 -m pytest test_microstepper.py -s
+   python3 -m pytest test_stepper_motor.py -s
    ```
 
 4. **Use pytest's --pdb flag to drop into debugger on failure:**
    ```bash
-   python3 -m pytest test_microstepper.py --pdb
+   python3 -m pytest test_stepper_motor.py --pdb
    ```
 
 ## CI/CD Integration
@@ -182,7 +182,7 @@ Always validate critical functionality on actual hardware before deployment.
 ## Troubleshooting
 
 **ImportError: No module named 'machine'**
-- Make sure you're importing machine_mock before microstepper
+- Make sure you're importing machine_mock before stepper_motor
 - Check that conftest.py is in the same directory
 
 **Tests pass but hardware doesn't work**
