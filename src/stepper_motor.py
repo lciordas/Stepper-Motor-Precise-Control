@@ -77,7 +77,7 @@ class StepperMotor:
                 rpm:             Speed in revolutions per minute
                 direction:       "cw" (clockwise) or "ccw" (counter-clockwise)
 
-        set_rotor(target_angle, direction, delay=0.01):
+        turn_rotor(target_angle, direction, delay=0.01):
             Positions the rotor to a specific angle with microstepping precision.
             Parameters:
                 target_angle: Target position in degrees (0-360)
@@ -88,8 +88,9 @@ class StepperMotor:
     # Constants
     PWM_FREQUENCY  = 25000   # PWM frequency (higher = quieter, smoother)
     MAX_MICROSTEPS = 2**4    # Maximum number of micro-steps into which we can break a full step (must be a power of 2).
+    MIN_DELAY      = 0.01    # Minimum delay between successive steps; needed for the motor to settle down (typically 10ms is safe)
 
-    def __init__(self, ain1, ain2, pwma, bin1, bin2, pwmb, verbose=False):
+    def __init__(self, ain1, ain2, pwma, bin1, bin2, pwmb):
         """
         Initialize the motor and its interface.
         The motor is energized such that a rotor tooth is aligned with the top stator pole.
@@ -101,16 +102,11 @@ class StepperMotor:
             bin1: number of Pico 2 GPIO pin connected to Phase B input 1 pin on H-bridge
             bin2: number of Pico 2 GPIO pin connected to Phase A input 2 pin on H-bridge
             pwmb: number of Pico 2 GPIO pin connected to Phase B PWM pin on H-bridge
-            verbose: enable logging (default False)
         """
         # The max number of micro-steps into which we can break a full step must
         # be a power of 2 and cannot larger than the number of ticks in a sector.
-        assert RotorAngle.is_power_of_2(StepperMotor.MAX_MICROSTEPS),\
-            f"StepperMotor.MAX_MICROSTEPS must be a power of 2, got {StepperMotor.MAX_MICROSTEPS}"
-        assert StepperMotor.MAX_MICROSTEPS <= RotorAngle.SECTOR_TICKS,\
-            f"StepperMotor.MAX_MICROSTEPS cannot be larger than RotorAngle.SECTOR_TICKS"
-        
-        self._verbose = verbose
+        assert RotorAngle.is_power_of_2(StepperMotor.MAX_MICROSTEPS)
+        assert StepperMotor.MAX_MICROSTEPS <= RotorAngle.SECTOR_TICKS
 
         # Configure GPIO pins
         # -- Phase A
@@ -124,81 +120,70 @@ class StepperMotor:
         self.pwmb = PWM(Pin(pwmb))
         self.pwmb.freq(StepperMotor.PWM_FREQUENCY)
 
-        # Energize the motor and turn the rotor such
-        # that one tooth aligns with the top pole.
+        # Pre-calculate the current intensities for phases A and B throughout a complete 
+        # electrical cycle, divided into micro-steps. The cycle consists of 4 full steps, 
+        # each subdivided into a number of micro-steps (here use maximum number allowed).
+        self.electric_cycle = \
+            calculate_electric_cycle(StepperMotor.MAX_MICROSTEPS, calculate_currents_sinusoidal)
+
+        # Energize the motor using the first configuration in the electric cycle.
+        # This translates into a mechanical configuration in which one rotor tooth 
+        # aligns with one of the poles (actually 2 opposite teeth are both aligned
+        # with two opposite poles).
         self._energize_phase(phase='A', I=1.0)
         self._energize_phase(phase='B', I=0.0)
-        
-        # We conventionally call the mechanical configuration
-        # in which we've placed the rotor as a rotation of 0°.
-        # See 'RotorAngle' docstring for an explanations of 
-        # 'sector' and 'ticks'.
+
+        # Imagine rotating the motor so that the two stator poles aligned with the 
+        # rotor teeth lie at the top and bottom of the circular stator. We define 
+        # this mechanical arrangement as the 0° reference position for the rotor.
+        # See 'RotorAngle' docstring for an explanations of 'sector' and 'ticks'.
         self.rotor_angle = RotorAngle(sector=1, ticks=0)
                 
-        # To turn the rotor one full step at a time, we need to
-        # cycle through a set of four electrical configurations.
-        # We list them below:
-        self.align_actions = (('A', +1),  # fully energize (positively) Phase A, Phase B is off
-                              ('B', +1),  # fully energize (positively) Phase B, Phase A is off
-                              ('A', -1),  # fully energize (negatively) Phase A, Phase B is off
-                              ('B', -1))  # fully energize (negatively) Phase B, Phase A is off
-
-        self.electric_cycle = calculate_electric_cycle(StepperMotor.MAX_MICROSTEPS, calculate_currents_sinusoidal)
-
-        # Log debugging information if needed
-        self.log(f"\nMotor initialized")
-
     @property
     def is_aligned(self):
         """
-        Whether the rotor is aligned with a sector boundary.
+        Whether any rotor tooth is aligned with a stator pole.
+
+        This equivalent to the rotor being aligned with a sector boundary.
         See class docstring for more details.
 
         Returns:
             bool: True if aligned
         """
-        # Check if rotor_angle exists
-        if not hasattr(self, 'rotor_angle') or self.rotor_angle is None:
-            return False  # If rotor_angle doesn't exist, consider it not aligned
         return self.rotor_angle.sector_position_in_ticks == 0
 
     @property
     def aligned_position(self):
         """
-        The aligned position (1-4) if aligned, None otherwise.
-        See class docstring for more details.
+        The aligned position (1-4) if the rotor is aligned, None otherwise.
+
+        There are 4 possible aligned positions, depending on which pair 
+        of stator poles is aligned with a pair of opposite rotor teeth.
 
         Returns:
-            int or None: aligned position number or None
+            int or None: aligned position number (1-4) or None
         """
         if not self.is_aligned:
-            return None
-        # Check if rotor_angle exists (redundant with is_aligned check but safer)
-        if not hasattr(self, 'rotor_angle') or self.rotor_angle is None:
             return None
         return (self.rotor_angle.sector - 1) % 4 + 1
 
     def align_rotor(self, direction):
         """
-        Aligns a rotor tooth with a stator pole.
-        See class docstring for more details.
+        Aligns a pair of opposite rotor teeth with a pair of stator poles.
 
+        The rotor will be turned by the smallest angle that brings it to 
+        an aligned position, in the direction specified. We can request
+        that the rotor is turned (counter)-clockwise, or just request it
+        to be turned to the closest aligned configuration.
+        
         Parameters
         ----------
         direction: in which direction to turn the rotor in order to align it ("cw", "ccw", "closest")
         """
         assert direction in ("cw", "ccw", "closest")
 
-        # Prepare debugging information
-        logmsg = f"\nFUNCTION CALL: align_rotor(direction={direction})\n"
-        if self.is_aligned:
-            logmsg += f"  the rotor is already aligned - nothing to do"
-        else:
-            logmsg += f"  starting position: sector={self.rotor_angle.sector}, ticks={self.rotor_angle.sector_position_in_ticks:05d}\n"
-
         # Nothing to do if the rotor is aligned already
         if self.is_aligned:
-            self.log(logmsg)
             return
 
         # Decide which of the four aligned configurations to use. This depends on the current rotor angle.
@@ -211,63 +196,71 @@ class StepperMotor:
 
         sector_norm  = (self.rotor_angle.sector - 1) % 4 + 1   # normalize sector to 1-4
         position_ccw = sector_norm                             # the counter-clockwise aligned position (1-4)
-        position_cw  = (sector_norm % 4) + 1                   # then clocwise aligned position (1-4)
+        position_cw  = (sector_norm % 4) + 1                   # the clocwise aligned position (1-4)
 
         if   direction == "cw" : position = position_cw
         elif direction == "ccw": position = position_ccw
         else:                    position = position_ccw if self.rotor_angle.sector_half == 1 else position_cw
 
-        # Update rotor state
+        # Update rotor position
         self.rotor_angle.rotate_to_sector_boundary(clockwise = (position == position_cw))
 
-        # Log debugging information (if needed)
-        logmsg += f"  final    position: sector={self.rotor_angle.sector}, ticks={self.rotor_angle.sector_position_in_ticks:05d}\n"
-        logmsg += f"  aligned position = {self.aligned_position}"
-        self.log(logmsg)
-
-        # Physically move the rotor
-        phase, current = self.align_actions[position-1]
+        # Physically move the rotor to the aligned position
+        align_actions  = [('A', +1), ('B', +1), ('A', -1), ('B', -1)]
+        phase, current = align_actions[position-1]
         self._energize_phase(phase=phase, I=current)
+
+        # Wait for the motor to settle down in the aligned position.
+        time.sleep(StepperMotor.MIN_DELAY)
 
     def spin_rotor(self, num_revolutions, rpm, direction, num_microsteps=1):
         """
-        Spin the motor for a specified number of revolutions at a given speed.
+        Spin the rotor for a specified number of revolutions at a given speed.
 
-        Note that the rotor might not travel exactly 'num_revolutions * 360' 
-        degrees because:
-        1. If 'num_revolutions' is fractional, it is rounded to the nearest whole 
-           number of sectors.
-        2. Before starting the spin operation, the rotor is first aligned (in the 
-           chosen direction of rotation).
-
+        The rotor might not travel exactly 'num_revolutions * 360°' because:
+        1. Before starting to spin the rotor, the rotor is aligned (in the 
+           chosen direction of rotation). Only after aligning it we do start 
+           counting revolutions.
+        2. This method spins the rotor for a whole number of full steps (even 
+           when micro-stepping, that only makes the movement smoother), so a 
+           non-integer 'num_revolutions' might get rounded to a multiple of 
+           full steps not exactly equal to the intended angle.
+        
+        The rotor might spin slower than requested via the 'rpm' argument, especially 
+        when increasing the number of micro-steps. This is due to the fact that we 
+        impose a minimum delay between successive micro-steps, to allow the current to 
+        settle. With a StepperMotor.MIN_DELAY of 10ms the max rpm is 30.
+        
         Parameters
         ----------
         num_revolutions : float
             Number of complete revolutions to spin the motor (must be positive or zero)
             Can be fractional (e.g., 0.5 for half revolution) or 'inf' to spin forever.
         rpm : float
-            Speed of rotation in revolutions per minute.
+            Speed of rotation in revolutions per minute (actual rpm could be lower)
         direction : str
             Direction of rotation - either "cw" (clockwise) or "ccw" (counter-clockwise).
         num_microsteps: int
             Into how many smaller steps to break down a full step rotation (a power of 2).
+            Higher count results in smoother movement.
         """
-        assert direction in ("cw", "ccw")
         assert num_revolutions >= 0
+        assert rpm > 0
+        assert direction in ("cw", "ccw")
 
-        # convert "revolutions" into "sectors" 
-        num_sectors = round(num_revolutions * RotorAngle.SECTOR_COUNT)
+        # Convert "revolutions" into "full steps" 
+        num_fullsteps = round(num_revolutions * RotorAngle.FULL_STEPS_PER_REV)
 
-        # convert 'rpm' into how long it takes to rotate one full step (measured in seconds)
-        period = 60 / (RotorAngle.SECTOR_COUNT * rpm)
+        # Convert 'rpm' into how long it takes to turn one full step (in seconds)
+        time_per_step = 60 / (RotorAngle.FULL_STEPS_PER_REV * rpm)
 
         # start by aligning the rotor...
         self.align_rotor(direction)
 
-        # ... and continue by rotating it one sector (full step) at a time
-        self._rotate_sectors(num_sectors, period, num_microsteps)
+        # ... and continue by turning it one full step at a time
+        self._rotate_full_steps(num_fullsteps, time_per_step, num_microsteps)
 
-    def set_rotor(self, target_angle, direction, num_microsteps=1, delay=0.01):
+    def turn_rotor(self, target_angle, direction, num_microsteps=1):
         """
         Positions the rotor to an arbitrary angle.
 
@@ -288,8 +281,7 @@ class StepperMotor:
         angle:              - target rotor position as angle relative to vertical
                               measured in degrees (clockwise is positive direction)
         direction:          - in which direction to turn the rotor ("closest", "cw", "ccw")
-        num_microsteps: int - how many micro-steps to take to rotate one full step (power of 2)        
-        delay: float        - delay between rotation steps in seconds (default 0.01)
+        num_microsteps: int - into how many smaller steps to break down a full step rotation (a power of 2).        
         """
         assert direction in ("cw", "ccw", "closest")
 
@@ -297,78 +289,102 @@ class StepperMotor:
         # quantify the input using fixed precission arithmetic.
         target_position = RotorAngle.from_degrees(target_angle)
 
-        # Prepare debugging information.
-        logmsg = f"\nFUNCTION CALL: position_rotor(target_angle={target_position.to_degrees:.4f}, direction={direction}, delay={delay})\n"
-
         # Special case: target and current angle are the same
         if target_position == self.rotor_angle:
-            self.log(logmsg + " Current and target angles are the same - nothing to do")
             return
 
         # Calculate current and target sectors
         current_sector = self.rotor_angle.sector
         target_sector  = target_position.sector
-
-        # Prepare debugging information.
-        logmsg += "Current Angle:\n" + str(self.rotor_angle)
-        logmsg += "Target Angle:\n"  + str(target_position)
         
         # Special case: rotor is already in the target sector
         if current_sector == target_sector:
-            self.log(logmsg + "Rotor is already in the target sector")
             self._rotate_in_sector(target_position.sector_position_in_ticks)
+            time.sleep(StepperMotor.MIN_DELAY)
             return
 
         # Determine direction of rotation if "closest" is specified
         if direction == "closest":
             trgt_degrees = target_position.to_degrees
             curr_degrees = self.rotor_angle.to_degrees 
-            angle_cw  = (trgt_degrees - curr_degrees) % 360
-            angle_ccw = (curr_degrees - trgt_degrees) % 360
-            direction = "cw" if angle_cw <= angle_ccw else "ccw"
-        
-        # Log debugging information (if needed)
-        logmsg += f"Direction of rotation = {direction}"
-        self.log(logmsg)
+            angle_cw     = (trgt_degrees - curr_degrees) % 360
+            angle_ccw    = (curr_degrees - trgt_degrees) % 360
+            direction    = "cw" if angle_cw <= angle_ccw else "ccw"
 
-        # Start by aligning the rotor
+        # Start by aligning the rotor.
         self.align_rotor(direction=direction)
 
-        # Next rotate a full number of sectors
-        if direction == "cw": num_sectors =   (target_sector  - current_sector) % RotorAngle.SECTOR_COUNT
-        else:                 num_sectors = -((current_sector - target_sector ) % RotorAngle.SECTOR_COUNT)
-        self._rotate_sectors(num_sectors, delay, num_microsteps)
+        # Next rotate a whole number of full steps
+        if direction == "cw": num_full_steps =   (target_sector  - current_sector) % RotorAngle.SECTOR_COUNT
+        else:                 num_full_steps = -((current_sector - target_sector ) % RotorAngle.SECTOR_COUNT)
+        time_per_step = StepperMotor.MIN_DELAY * num_microsteps
+        self._rotate_full_steps(num_full_steps, time_per_step, num_microsteps)
 
         # Finaly, position rotor within target sector
         self._rotate_in_sector(target_position.sector_position_in_ticks)
 
-        # Log debugging information if needed
-        self.log(f"Positioning the rotor completed, rotor angle={self.rotor_angle.to_degrees}")
+        # Wait for the motor to settle down.
+        time.sleep(StepperMotor.MIN_DELAY)
 
-    def log(self, logmsg):
-        if self._verbose:
-            print(logmsg, end="\n")
-
-    def _rotate_sector(self, direction, duration, num_microsteps):
+    def _rotate_full_steps(self, num_fullsteps, time_per_step, num_microsteps):
         """
-        Rotate an aligned rotor by one sector (one full step).
+        Rotate an aligned rotor a given number of full steps ('inf' to rotate forever).
+
+        This method can only be used when the rotor is aligned.
+        Note that it leaves the rotor also in an aligned state.
+
+        Completing each full step might take longer than the duration requested 
+        via the argument, especially when increasing the number of micro-steps. 
+        This is due to the fact that we impose a minimum delay between successive 
+        micro-steps, to allow the current to settle (see StepperMotor.MIN_DELAY).
+
+        Parameters
+        ----------
+        num_fullsteps : int or inf - by how many full steps to rotate the rotor (positive for clockwise)
+        time_per_step : float      - how long it takes to rotate by one sector, in seconds
+        num_microsteps: int        - how many micro-steps to take to rotate one sector (power of 2)        
+        """
+        assert self.is_aligned                                         # this method may only be used with an aligned rotor
+        assert isinstance(num_fullsteps, int) or isinf(num_fullsteps)  # cannot rotate a fractional number of full steps
+
+        # Trivial case
+        if num_fullsteps == 0:
+            return
+
+        # Direction of rotation
+        direction     = "cw" if num_fullsteps > 0 else "ccw"
+        num_fullsteps = abs(num_fullsteps)
+
+        # Rotate one full step at a time using '_rotate_sector',
+        # which is responsible for micro-stepping, if any.
+        i = 0
+        while i < num_fullsteps or isinf(num_fullsteps):
+            i += 1
+            self._rotate_full_step(direction, time_per_step, num_microsteps)            
+
+    def _rotate_full_step(self, direction, duration, num_microsteps):
+        """
+        Rotate an aligned rotor by one full step.
 
         This method can only be used when the rotor is aligned.
         The rotation may be performed in one step (full-stepping) or broken down
         into smaller steps (micro-stepping). The number of micro-steps must be a
         power of 2, no larger than MAX_MICROSTEPS.
 
+        Completing the full step might take longer than the duration requested 
+        via the argument, especially when increasing the number of micro-steps. 
+        This is due to the fact that we impose a minimum delay between successive 
+        micro-steps, to allow the current to settle (see StepperMotor.MIN_DELAY)
+        
         Parameters
         ----------
         direction     : str   - direction of rotation ("cw" or "ccw")
-        duration      : float - how long it takes to complete the rotation (in seconds)
+        duration      : float - how long it takes to complete the full step (in seconds)
         num_microsteps: int   - how many micro-steps to take to rotate one full step (power of 2)
         """
         # The number of micro-steps must be a power of two and cannot exceed 'MAX_MICROSTEPS'.
-        assert RotorAngle.is_power_of_2(num_microsteps),\
-            f"The 'num_microsteps' argument must be a power of 2."
-        assert num_microsteps <= StepperMotor.MAX_MICROSTEPS,\
-            f"The 'num_microsteps' argument cannot exceed 'StepperMotor.MAX_MICROSTEPS'."
+        assert RotorAngle.is_power_of_2(num_microsteps)
+        assert num_microsteps <= StepperMotor.MAX_MICROSTEPS
         assert direction in ('cw', 'ccw')
         assert self.is_aligned   # this method may only be used with an aligned rotor
 
@@ -391,6 +407,9 @@ class StepperMotor:
         # array when using fewer microsteps than MAX_MICROSTEPS.
         stride = StepperMotor.MAX_MICROSTEPS // num_microsteps
 
+        # how long to wait in between steps for current to settle down.
+        downtime = max(duration/num_microsteps, StepperMotor.MAX_MICROSTEPS)
+
         # Rotate one microstep at a time.
         for microstep in range(num_microsteps):
 
@@ -405,61 +424,20 @@ class StepperMotor:
             self._energize_phase(phase='A', I=IA)
             self._energize_phase(phase='B', I=IB)
 
-            # Wait before next microstep
-            time.sleep(duration/num_microsteps)
+            # Wait before next micro-step
+            time.sleep(downtime)
 
         # Update the rotor angle to reflect the new position
         self.rotor_angle.move_one_sector(clockwise=(direction == 'cw'))
-
-    def _rotate_sectors(self, num_sectors, period, num_microsteps):
-        """
-        Rotate an aligned rotor a given number of sectors ('inf' to rotate forever).
-
-        This method can only be used when the rotor is aligned.
-        Note that it leaves the rotor also in an aligned state.
-
-        Parameters
-        ----------
-        num_sectors   : int or inf - by how many sectors to rotate the rotor (positive for clockwise)
-        period        : float      - how long it takes to rotate by one sector, in seconds
-        num_microsteps: int        - how many micro-steps to take to rotate one sector (power of 2)        
-        """
-        assert self.is_aligned                                     # this method may only be used with an aligned rotor
-        assert isinstance(num_sectors, int) or isinf(num_sectors)  # cannot rotate a fractional number of sectors
-
-        # Prepare debugging information
-        logmsg = f"\nFUNCTION CALL: _rotate_sectors(num_sectors={num_sectors}, period={period}, num_microsteps={num_microsteps})\n"
-
-        # Trivial case
-        if num_sectors == 0:
-            self.log(logmsg + " nothing to do")
-            return
-
-        # Direction of rotation
-        direction   = "cw" if num_sectors > 0 else "ccw"
-        num_sectors = abs(num_sectors)
-
-        # Rotate one sector at a time using _rotate_sector
-        logmsg += f"  sector: {self.rotor_angle.sector:3d} -> "
-        i = 0
-        while i < num_sectors or isinf(num_sectors):
-            self._rotate_sector(direction, period, num_microsteps)
-            logmsg += f"{self.rotor_angle.sector:3d} -> " + ("\n          " if ((i+1) % 15 == 0) else "")
-            
-            i += 1
-            if not isinf(num_sectors) and i >= num_sectors:
-                break
-
-        # Log debugging information (if needed)
-        self.log(logmsg[:-4])
 
     def _rotate_in_sector(self, target_ticks):
         """
         Position the rotor inside a sector.
 
-        This method positions the rotor to a specific angle within the current sector.
-        The rotor must already be in the target sector before calling this method.
-        If not, use '_rotate_sectors(...)' first to move to the correct sector.
+        This method positions the rotor to a specific location within the current 
+        sector, given in 'ticks'. The rotor must already be in the target sector 
+        before calling this method. If not, use '_rotate_full_steps(...)' first, 
+        to rotate the rotor to the correct sector.
 
         Parameters
         ----------
@@ -468,16 +446,8 @@ class StepperMotor:
         assert isinstance(target_ticks, int)  
         assert 0 <= target_ticks < RotorAngle.SECTOR_TICKS
 
-        # Prepare debugging information
-        target_position = RotorAngle(self.rotor_angle.sector, target_ticks)
-        logmsg  = f"\nFUNCTION CALL: _rotate_in_sector(target_ticks={target_ticks})\n"
-        logmsg += f"target:  {target_position.sector_position_in_degrees:8.4f}°, {target_position.sector_position_in_ticks:5d} ticks\n"
-        logmsg += f"current: {self.rotor_angle.sector_position_in_degrees:8.4f}°, {self.rotor_angle.sector_position_in_ticks:5d} ticks\n"
-
         # Trivial case, the rotor is already in the target position
         if target_ticks == self.rotor_angle.sector_position_in_ticks:
-            logmsg += " the rotor is already in the target position - nothing to do"
-            self.log(logmsg)
             return
 
         # Find the aligned rotor position that corresponds to the
@@ -489,8 +459,8 @@ class StepperMotor:
 
         # Calculate by how much to change the electric angle that produces the
         # ccw aligned position, in order to bring the rotor to the target angle.
-        # Remember that turning the rotor by one sector (1.8°) is accomplished by
-        # rotating the electric angle by pi/2.
+        # Remember that turning the rotor by one sector (1.8°) is accomplished 
+        # by rotating the electric angle by pi/2.
         incremental_electric_angle = 0
         if target_ticks > 0:    
             incremental_electric_angle = (target_ticks * pi) / (2 * RotorAngle.SECTOR_TICKS)
@@ -501,10 +471,7 @@ class StepperMotor:
         self._energize_phase(phase='B', I=sin(electric_angle))
 
         # Update rotor state
-        self.rotor_angle = target_position
-
-        # Log debugging information (if needed)
-        self.log(logmsg)
+        self.rotor_angle = RotorAngle(self.rotor_angle.sector, target_ticks)
 
     def _energize_phase(self, phase, I):
         """
