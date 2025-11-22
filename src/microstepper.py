@@ -1,8 +1,9 @@
 from machine import Pin, PWM
-from math    import cos, sin, pi, inf, isinf
-import itertools, time
+from math    import cos, sin, pi, isinf
+import time
 
-from rotor_angle import RotorAngle
+from electric_cycle import calculate_electric_cycle, calculate_currents_sinusoidal
+from rotor_angle    import RotorAngle
 
 class MicrostepMotor:
     """
@@ -85,7 +86,8 @@ class MicrostepMotor:
     """
 
     # Constants
-    PWM_FREQUENCY = 25000   # PWM frequency (higher = quieter, smoother)
+    PWM_FREQUENCY  = 25000   # PWM frequency (higher = quieter, smoother)
+    MAX_MICROSTEPS = 2**4    # Maximum number of micro-steps into which we can break a full step (must be a power of 2).
 
     def __init__(self, ain1, ain2, pwma, bin1, bin2, pwmb, verbose=False):
         """
@@ -101,6 +103,13 @@ class MicrostepMotor:
             pwmb: number of Pico 2 GPIO pin connected to Phase B PWM pin on H-bridge
             verbose: enable logging (default False)
         """
+        # The max number of micro-steps into which we can break a full step must
+        # be a power of 2 and cannot larger than the number of ticks in a sector.
+        assert RotorAngle.is_power_of_2(MicrostepMotor.MAX_MICROSTEPS),\
+            f"MicrostepMotor.MAX_MICROSTEPS must be a power of 2, got {MicrostepMotor.MAX_MICROSTEPS}" 
+        assert MicrostepMotor.MAX_MICROSTEPS <= RotorAngle.SECTOR_TICKS,\
+            f"MicrostepMotor.MAX_MICROSTEPS cannot be larger than RotorAngle.SECTOR_TICKS"
+        
         self._verbose = verbose
 
         # Configure GPIO pins
@@ -125,7 +134,7 @@ class MicrostepMotor:
         # See 'RotorAngle' docstring for an explanations of 
         # 'sector' and 'ticks'.
         self.rotor_angle = RotorAngle(sector=1, ticks=0)
-        
+                
         # To turn the rotor one full step at a time, we need to
         # cycle through a set of four electrical configurations.
         # We list them below:
@@ -133,6 +142,8 @@ class MicrostepMotor:
                               ('B', +1),  # fully energize (positively) Phase B, Phase A is off
                               ('A', -1),  # fully energize (negatively) Phase A, Phase B is off
                               ('B', -1))  # fully energize (negatively) Phase B, Phase A is off
+
+        self.electric_cycle = calculate_electric_cycle(MicrostepMotor.MAX_MICROSTEPS, calculate_currents_sinusoidal)
 
         # Log debugging information if needed
         self.log(f"\nMotor initialized")
@@ -218,7 +229,7 @@ class MicrostepMotor:
         phase, current = self.align_actions[position-1]
         self._energize_phase(phase=phase, I=current)
 
-    def spin_rotor(self, num_revolutions, rpm, direction):
+    def spin_rotor(self, num_revolutions, rpm, direction, num_microsteps=1):
         """
         Spin the motor for a specified number of revolutions at a given speed.
 
@@ -238,6 +249,8 @@ class MicrostepMotor:
             Speed of rotation in revolutions per minute.
         direction : str
             Direction of rotation - either "cw" (clockwise) or "ccw" (counter-clockwise).
+        num_microsteps: int
+            Into how many smaller steps to break down a full step rotation (a power of 2).
         """
         assert direction in ("cw", "ccw")
         assert num_revolutions >= 0
@@ -245,16 +258,16 @@ class MicrostepMotor:
         # convert "revolutions" into "sectors" 
         num_sectors = round(num_revolutions * RotorAngle.SECTOR_COUNT)
 
-        # convert 'rpm' into delay between sector rotations (measured in seconds)
-        delay = 60 / (RotorAngle.SECTOR_COUNT * rpm)
+        # convert 'rpm' into how long it takes to rotate one full step (measured in seconds)
+        period = 60 / (RotorAngle.SECTOR_COUNT * rpm)
 
         # start by aligning the rotor...
         self.align_rotor(direction)
 
-        # ... and continue by rotating it one sector at a time
-        self._rotate_sectors(num_sectors, delay)
+        # ... and continue by rotating it one sector (full step) at a time
+        self._rotate_sectors(num_sectors, period, num_microsteps)
 
-    def set_rotor(self, target_angle, direction, delay=0.01):
+    def set_rotor(self, target_angle, direction, num_microsteps=1, delay=0.01):
         """
         Positions the rotor to an arbitrary angle.
 
@@ -272,10 +285,11 @@ class MicrostepMotor:
         
         Parameters
         ----------
-        angle:     target rotor position as angle relative to vertical
-                   measured in degrees (clockwise is positive direction)
-        direction: in which direction to turn the rotor ("closest", "cw", "ccw")
-        delay:     delay between rotation steps in seconds (default 0.01)
+        angle:              - target rotor position as angle relative to vertical
+                              measured in degrees (clockwise is positive direction)
+        direction:          - in which direction to turn the rotor ("closest", "cw", "ccw")
+        num_microsteps: int - how many micro-steps to take to rotate one full step (power of 2)        
+        delay: float        - delay between rotation steps in seconds (default 0.01)
         """
         assert direction in ("cw", "ccw", "closest")
 
@@ -323,7 +337,7 @@ class MicrostepMotor:
         # Next rotate a full number of sectors
         if direction == "cw": num_sectors =   (target_sector  - current_sector) % RotorAngle.SECTOR_COUNT
         else:                 num_sectors = -((current_sector - target_sector ) % RotorAngle.SECTOR_COUNT)
-        self._rotate_sectors(num_sectors, delay)
+        self._rotate_sectors(num_sectors, delay, num_microsteps)
 
         # Finaly, position rotor within target sector
         self._rotate_in_sector(target_position.sector_position_in_ticks)
@@ -335,7 +349,69 @@ class MicrostepMotor:
         if self._verbose:
             print(logmsg, end="\n")
 
-    def _rotate_sectors(self, num_sectors, delay):
+    def _rotate_sector(self, direction, duration, num_microsteps):
+        """
+        Rotate an aligned rotor by one sector (one full step).
+
+        This method can only be used when the rotor is aligned.
+        The rotation may be performed in one step (full-stepping) or broken down
+        into smaller steps (micro-stepping). The number of micro-steps must be a
+        power of 2, no larger than MAX_MICROSTEPS.
+
+        Parameters
+        ----------
+        direction     : str   - direction of rotation ("cw" or "ccw")
+        duration      : float - how long it takes to complete the rotation (in seconds)
+        num_microsteps: int   - how many micro-steps to take to rotate one full step (power of 2)
+        """
+        # The number of micro-steps must be a power of two and cannot exceed 'MAX_MICROSTEPS'.
+        assert RotorAngle.is_power_of_2(num_microsteps),\
+            f"The 'num_microsteps' argument must be a power of 2."
+        assert num_microsteps <= MicrostepMotor.MAX_MICROSTEPS,\
+            f"The 'num_microsteps' argument cannot exceed 'MicrostepMotor.MAX_MICROSTEPS'."
+        assert direction in ('cw', 'ccw')
+        assert self.is_aligned   # this method may only be used with an aligned rotor
+
+        # Get the current sector and calculate which quarter of the electric cycle we're in.
+        # The electric cycle has a period of 4 sectors:
+        #   Sectors 1, 5,  9, 13... start at quarter 1 (Phase A=+1, Phase B= 0)
+        #   Sectors 2, 6, 10, 14... start at quarter 2 (Phase A= 0, Phase B=+1)
+        #   Sectors 3, 7, 11, 15... start at quarter 3 (Phase A=-1, Phase B= 0)
+        #   Sectors 4, 8, 12, 16... start at quarter 4 (Phase A= 0, Phase B=-1)
+        current_sector   = self.rotor_angle.sector
+        starting_quarter = ((current_sector - 1) % 4) + 1  # 1-4
+
+        # Calculate the offset in the 'electric_cycle' array due to 
+        # which quarter of the electric cycle we are currently in.
+        # The array has 4 * MAX_MICROSTEPS entries for one complete 
+        # electrical cycle => each quarter has MAX_MICROSTEPS entries.
+        offset = (starting_quarter - 1) * MicrostepMotor.MAX_MICROSTEPS
+
+        # Calculate how many entries to skip in the 'electric_cycle'
+        # array when using fewer microsteps than MAX_MICROSTEPS.
+        stride = MicrostepMotor.MAX_MICROSTEPS // num_microsteps
+
+        # Rotate one microstep at a time.
+        for microstep in range(num_microsteps):
+
+            # Calculate the index into the 'electric_cycle' array
+            if direction == 'cw':
+                cycle_index = (offset + (microstep + 1) * stride) % len(self.electric_cycle)
+            else:
+                cycle_index = (offset - (microstep + 1) * stride) % len(self.electric_cycle)
+
+            # Energize stator phases
+            IA, IB = self.electric_cycle[cycle_index]
+            self._energize_phase(phase='A', I=IA)
+            self._energize_phase(phase='B', I=IB)
+
+            # Wait before next microstep
+            time.sleep(duration/num_microsteps)
+
+        # Update the rotor angle to reflect the new position
+        self.rotor_angle.move_one_sector(clockwise=(direction == 'cw'))
+
+    def _rotate_sectors(self, num_sectors, period, num_microsteps):
         """
         Rotate an aligned rotor a given number of sectors ('inf' to rotate forever).
 
@@ -344,14 +420,15 @@ class MicrostepMotor:
 
         Parameters
         ----------
-        num_sectors: int or inf - by how many sectors to rotate the rotor (positive for clockwise)
-        delay      : float      - how long to wait between each rotation step, in seconds
+        num_sectors   : int or inf - by how many sectors to rotate the rotor (positive for clockwise)
+        period        : float      - how long it takes to rotate by one sector, in seconds
+        num_microsteps: int        - how many micro-steps to take to rotate one sector (power of 2)        
         """
-        assert self.is_aligned                                    # this method may only be used with an aligned rotor
-        assert isinstance(num_sectors, int) or isinf(num_sectors) # cannot rotate a fractional number of sectors
+        assert self.is_aligned                                     # this method may only be used with an aligned rotor
+        assert isinstance(num_sectors, int) or isinf(num_sectors)  # cannot rotate a fractional number of sectors
 
         # Prepare debugging information
-        logmsg = f"\nFUNCTION CALL: _rotate_sectors(num_sectors={num_sectors}, delay={delay})\n"
+        logmsg = f"\nFUNCTION CALL: _rotate_sectors(num_sectors={num_sectors}, period={period}, num_microsteps={num_microsteps})\n"
 
         # Trivial case
         if num_sectors == 0:
@@ -359,29 +436,19 @@ class MicrostepMotor:
             return
 
         # Direction of rotation
-        moving_clockwise   = (num_sectors > 0)
-        position_increment = +1 if moving_clockwise else -1
-        num_sectors        = abs(num_sectors)
+        direction   = "cw" if num_sectors > 0 else "ccw"
+        num_sectors = abs(num_sectors)
 
-        # Rotate one sector at a time
+        # Rotate one sector at a time using _rotate_sector
         logmsg += f"  sector: {self.rotor_angle.sector:3d} -> "
-        step_iterator = range(num_sectors) if num_sectors != inf else itertools.count()
-        for i in step_iterator:
-
-            # Calculate next aligned position
-            curr_aligned_pos = self.aligned_position
-            next_aligned_pos = ((curr_aligned_pos - 1 + position_increment) % 4) + 1
-
-            # Physically move the rotor to the new position
-            phase, current = self.align_actions[next_aligned_pos-1]
-            self._energize_phase(phase=phase, I=current)
-
-            # Update rotor state
-            self.rotor_angle.move_one_sector(clockwise=moving_clockwise)
+        i = 0
+        while i < num_sectors or isinf(num_sectors):
+            self._rotate_sector(direction, period, num_microsteps)
             logmsg += f"{self.rotor_angle.sector:3d} -> " + ("\n          " if ((i+1) % 15 == 0) else "")
-
-            # Wait before rotating again
-            time.sleep(delay)
+            
+            i += 1
+            if not isinf(num_sectors) and i >= num_sectors:
+                break
 
         # Log debugging information (if needed)
         self.log(logmsg[:-4])
