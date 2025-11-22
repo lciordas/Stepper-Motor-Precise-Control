@@ -45,12 +45,13 @@ class RotorAngle:
 
         SECTOR_COUNT: int
             The number of sectors into which the circle is divided.
+            This is equal with FULL_STEPS_PER_REV.
 
         SECTOR_SIZE: float
-            The size of each sector in degrees.
+            The size of each sector in degrees; same as size of a full step.
 
         SECTOR_TICKS: int, positive, a power of 2
-            The number of discrete ticks within each sector for precision.
+            The number of discrete ticks within each sector.
 
         TOTAL_TICKS: int
             The total number of discrete ticks around the complete circle.
@@ -141,13 +142,10 @@ class RotorAngle:
             sector: int - sector number (1-based) [1, FULL_STEPS_PER_REV]
             ticks : int - position within sector  [0, SECTOR_RESOLUTION)
         """
-        assert RotorAngle.is_power_of_2(RotorAngle.SECTOR_TICKS), \
-            f"RotorAngle.SECTOR_TICKS must be a power of 2, got {RotorAngle.SECTOR_TICKS}"        
-        assert 1 <= sector <= RotorAngle.SECTOR_COUNT, \
-            f"sector must be in [1, {RotorAngle.SECTOR_COUNT}], got {sector}"
-        assert 0 <= ticks < RotorAngle.SECTOR_TICKS, \
-            f"fixed_position must be in [0, {RotorAngle.SECTOR_TICKS}), got {ticks}"
-
+        assert RotorAngle.is_power_of_2(RotorAngle.SECTOR_TICKS)        
+        assert isinstance(sector, int) and (1 <= sector <= RotorAngle.SECTOR_COUNT)
+        assert isinstance(ticks,  int) and (0 <= ticks  <  RotorAngle.SECTOR_TICKS)
+        
         self._sector = sector   # the sector the rotor is in     (integer in [1, SECTOR_COUNT])
         self._ticks  = ticks    # the position within the sector (integer in [0, SECTOR_TICKS))
 
@@ -158,24 +156,25 @@ class RotorAngle:
         
         Angles are measured relative to the positive vertical axis.
         A positive angle corresponds to a clockwise rotation.
+        The input angle quantized to the closest sector tick.
         
         Parameters:
             angle: float - angle in degrees
 
         Returns:
-            RotorAngle: new instance (with input angle quantized)
+            RotorAngle: new instance (input angle quantized to closest tick)
         """
         # Restrict angle to [0, 360)
         angle_normalized = angle % 360
 
-        # Convert angle to ticks (using integer arithmetic after rounding)
+        # Convert angle to ticks
         angle_in_ticks = round(angle_normalized * cls.TOTAL_TICKS / 360)
-        if angle_in_ticks == cls.TOTAL_TICKS:
+        if angle_in_ticks >= cls.TOTAL_TICKS:
             angle_in_ticks = 0
 
         # Calculate sector and position within sector
         sector             = (angle_in_ticks // cls.SECTOR_TICKS) + 1
-        position_in_sector =  angle_in_ticks % cls.SECTOR_TICKS
+        position_in_sector =  angle_in_ticks %  cls.SECTOR_TICKS
 
         return cls(sector=sector, ticks=position_in_sector)
 
@@ -244,6 +243,7 @@ class RotorAngle:
     def move_one_sector(self, clockwise):
         """
         Move the rotor angle by one sector in the specified direction.
+        Moving by one sector is the same as rotating by one full step.
         It modifies this instance in-place.
 
         Parameters:
