@@ -123,8 +123,9 @@ class StepperMotor:
         # Pre-calculate the current intensities for phases A and B throughout a complete 
         # electrical cycle, divided into micro-steps. The cycle consists of 4 full steps, 
         # each subdivided into a number of micro-steps (here use maximum number allowed).
+        self.current_calculator = calculate_currents_sinusoidal
         self.electric_cycle = \
-            calculate_electric_cycle(StepperMotor.MAX_MICROSTEPS, calculate_currents_sinusoidal)
+            calculate_electric_cycle(StepperMotor.MAX_MICROSTEPS, self.current_calculator)
 
         # Energize the motor using the first configuration in the electric cycle.
         # This translates into a mechanical configuration in which one rotor tooth 
@@ -408,7 +409,7 @@ class StepperMotor:
         stride = StepperMotor.MAX_MICROSTEPS // num_microsteps
 
         # how long to wait in between steps for current to settle down.
-        downtime = max(duration/num_microsteps, StepperMotor.MAX_MICROSTEPS)
+        downtime = max(duration/num_microsteps, StepperMotor.MIN_DELAY)
 
         # Rotate one microstep at a time.
         for microstep in range(num_microsteps):
@@ -434,41 +435,32 @@ class StepperMotor:
         """
         Position the rotor inside a sector.
 
-        This method positions the rotor to a specific location within the current 
-        sector, given in 'ticks'. The rotor must already be in the target sector 
-        before calling this method. If not, use '_rotate_full_steps(...)' first, 
+        This method positions the rotor to a specific location within the current
+        sector, given in 'ticks'. The rotor must already be in the target sector
+        before calling this method. If not, use '_rotate_full_steps(...)' first,
         to rotate the rotor to the correct sector.
 
         Parameters
         ----------
         target_ticks: int - target position within the sector [0, RotorAngle.SECTOR_TICKS)
         """
-        assert isinstance(target_ticks, int)  
+        assert isinstance(target_ticks, int)
         assert 0 <= target_ticks < RotorAngle.SECTOR_TICKS
 
         # Trivial case, the rotor is already in the target position
         if target_ticks == self.rotor_angle.sector_position_in_ticks:
             return
-
-        # Find the aligned rotor position that corresponds to the
-        # ccw border of the sector in which the rotor is right now.
-        position_ccw = (self.rotor_angle.sector - 1) % 4 + 1                         
         
-        # Find the electric angle that corresponds to the ccw aligned position
-        electric_angle_aligned = [0, pi/2, pi, 3*pi/2][position_ccw-1]
+        # As the electrical cycle advances, the rotor moves by one full mechanical step (sector) 
+        # for each quarter of the electrical cycle. Therefore, the sector in which the rotor is 
+        # currently located tells us which quarter of the electrical cycle we are in.        
+        electric_cycle_quarter = (self.rotor_angle.sector - 1) % 4 + 1     # 1-4
+        electric_cycle_index   = (electric_cycle_quarter  - 1 + target_ticks / RotorAngle.SECTOR_TICKS) * 0.25
 
-        # Calculate by how much to change the electric angle that produces the
-        # ccw aligned position, in order to bring the rotor to the target angle.
-        # Remember that turning the rotor by one sector (1.8°) is accomplished 
-        # by rotating the electric angle by pi/2.
-        incremental_electric_angle = 0
-        if target_ticks > 0:    
-            incremental_electric_angle = (target_ticks * pi) / (2 * RotorAngle.SECTOR_TICKS)
-        electric_angle = electric_angle_aligned + incremental_electric_angle
-
-        # Physically move the rotor to the new position
-        self._energize_phase(phase='A', I=cos(electric_angle))
-        self._energize_phase(phase='B', I=sin(electric_angle))
+        # Energize stator phases        
+        IA, IB = self.current_calculator(electric_cycle_index)
+        self._energize_phase(phase='A', I=IA)
+        self._energize_phase(phase='B', I=IB)
 
         # Update rotor state
         self.rotor_angle = RotorAngle(self.rotor_angle.sector, target_ticks)
