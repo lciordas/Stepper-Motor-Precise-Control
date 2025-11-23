@@ -2,7 +2,7 @@ from machine import Pin, PWM
 from math    import cos, sin, pi, isinf
 import time
 
-from electric_cycle import calculate_electric_cycle, calculate_currents_sinusoidal
+from electrical_cycle import calculate_electric_cycle, calculate_currents_sinusoidal, calculate_currents_geometric
 from rotor_angle    import RotorAngle
 
 class StepperMotor:
@@ -123,7 +123,7 @@ class StepperMotor:
         # Pre-calculate the current intensities for phases A and B throughout a complete 
         # electrical cycle, divided into micro-steps. The cycle consists of 4 full steps, 
         # each subdivided into a number of micro-steps (here use maximum number allowed).
-        self.current_calculator = calculate_currents_sinusoidal
+        self.current_calculator = calculate_currents_geometric
         self.electric_cycle = \
             calculate_electric_cycle(StepperMotor.MAX_MICROSTEPS, self.current_calculator)
 
