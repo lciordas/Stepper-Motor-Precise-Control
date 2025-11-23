@@ -3,7 +3,7 @@ from math    import cos, sin, pi, isinf
 import time
 
 from electrical_cycle import calculate_electric_cycle, calculate_currents_sinusoidal, calculate_currents_geometric
-from rotor_angle    import RotorAngle
+from rotor_angle      import RotorAngle
 
 class StepperMotor:
     """
@@ -90,7 +90,8 @@ class StepperMotor:
     MAX_MICROSTEPS = 2**4    # Maximum number of micro-steps into which we can break a full step (must be a power of 2).
     MIN_DELAY      = 0.01    # Minimum delay between successive steps; needed for the motor to settle down (typically 10ms is safe)
 
-    def __init__(self, ain1, ain2, pwma, bin1, bin2, pwmb):
+    def __init__(self, ain1, ain2, pwma, bin1, bin2, pwmb,
+                 electric_cycle_calculator="sinusoidal"):
         """
         Initialize the motor and its interface.
         The motor is energized such that a rotor tooth is aligned with the top stator pole.
@@ -102,7 +103,9 @@ class StepperMotor:
             bin1: number of Pico 2 GPIO pin connected to Phase B input 1 pin on H-bridge
             bin2: number of Pico 2 GPIO pin connected to Phase A input 2 pin on H-bridge
             pwmb: number of Pico 2 GPIO pin connected to Phase B PWM pin on H-bridge
+            electric_cycle_calculator: which calculator to use to calculate electric currents
         """
+        assert electric_cycle_calculator in ("sinusoidal", "geometric")
         # The max number of micro-steps into which we can break a full step must
         # be a power of 2 and cannot larger than the number of ticks in a sector.
         assert RotorAngle.is_power_of_2(StepperMotor.MAX_MICROSTEPS)
@@ -123,7 +126,9 @@ class StepperMotor:
         # Pre-calculate the current intensities for phases A and B throughout a complete 
         # electrical cycle, divided into micro-steps. The cycle consists of 4 full steps, 
         # each subdivided into a number of micro-steps (here use maximum number allowed).
-        self.current_calculator = calculate_currents_geometric
+        calculators = {"geometric" : calculate_currents_geometric,
+                       "sinusoidal": calculate_currents_sinusoidal}
+        self.current_calculator = calculators[electric_cycle_calculator]
         self.electric_cycle = \
             calculate_electric_cycle(StepperMotor.MAX_MICROSTEPS, self.current_calculator)
 
