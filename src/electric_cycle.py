@@ -1,128 +1,173 @@
-from math import cos, sin, pi
+"""
+In this module we assume that we are working with a bipolar stepper motor with two phases.
+Each phase has four windings around four poles, positioned around the stator as follows:
+Phase A poles: A1 @ 0   , A2 @ 1/2π, A3 @ π   , A4 @ 3/2π 
+Phase B poles: B1 @ 1/4π, B2 @ 3/4π, B3 @ 5/4π, B4 @ 7/4π
 
+The windings around the poles are such that passing an electric current through the phase 
+generates alternating magnetic polarities:
+Positive current through Phase A:  A1 - Nord , A2 - South, A3 - Nord , A4 - South
+Negative current through Phase A:  A1 - South, A2 - Nord , A3 - South, A4 - Nord
+Positive current through Phase B:  B1 - Nord , B2 - South, B3 - Nord , B4 - South
+Negative current through Phase B:  B1 - South, B2 - Nord , B3 - South, B4 - Nord
 
-def calculate_currents_advanced(theta):
+Electrical Angle:
+-----------------
+To drive the rotor in full-step increments, we cycle through four distinct electrical states:
+
+  + Phase A at maximum positive current, Phase B at zero
+  + Phase B at maximum positive current, Phase A at zero
+  + Phase A at maximum negative current, Phase B at zero
+  + Phase B at maximum negative current, Phase A at zero
+
+We can express these four states compactly as the pairs: (1, 0), (0, 1), (-1, 0), (0, -1).
+
+If we treat the first value as the y-coordinate and the second as the x-coordinate, these 
+pairs describe a unit vector that starts vertical and rotates clockwise in 90° increments.
+
+The "electrical angle" is defined as the clockwise angle between this rotating unit vector 
+and the vertical. It is not a physical angle, but a convenient way to track which pattern 
+of electrical currents is being applied to the two motor phases.
+
+Magnetic Angle:
+---------------
+The currents flowing through the stator coils generate a magnetic field. As we advance the 
+electrical angle, this magnetic field rotates as well. By convention, when the electrical 
+angle is zero, we define the magnetic angle to be zero too.
+
+Unlike the electrical angle, the magnetic angle is a physical angle: it describes the actual
+rotation of the magnetic field configuration relative to a reference direction in the stator.
+
+A 90° change in electrical angle results in only a 45° rotation of the magnetic field. This is 
+because advancing the electrical angle by 90° energizes a different pair of stator poles that 
+are physically positioned 45° apart. Consequently, the magnetic angle progresses at half the 
+rate of the electrical angle.
+
+Mechanical Angle:
+-----------------
+The mechanical angle is the physical angle through which the rotor itself turns. 
+
+Micro-stepping:
+---------------
+Micro-stepping means turning the rotor in increments smaller than one full step (1.8°).
+The idea is to move through the same electric cycle, but in smaller steps. For example,
+rotating the electrical angle by only 45° would equally energize both phases and create
+a magnetic field positioned in the middle between two poles, therefore rotated by 22.5°.
+
+Micro-stepping means rotating the rotor in increments smaller than one full step (1.8°).
+This can be achieved by advancing through the electrical cycle in smaller increments.
+For example, if we rotate the electrical angle by only 45°, both phases become equally 
+energized. This produces a magnetic field oriented halfway between the two adjacent 
+stator poles—i.e., rotated by 22.5°. 
+
+The problem
+-----------
+It turns out that implementing micro-stepping by tracing a sinusoidal electrical cycle only 
+provides an approximate solution. This hasn’t been obvious so far, because the approximation 
+happens to be exact in the special cases of full-step and half-step operation.
+
+The real issue is this: we want to generate a magnetic field of constant magnitude, rotated 
+by an arbitrary angle. A sinusoidal pattern of phase currents would achieve this if the stator 
+poles were arranged 90° apart. But in a typical hybrid stepper, the poles are positioned 45° 
+apart, not 90°. 
+
+Because of the 45° spacing of the stator poles, a sinusoidal electrical cycle does not generate 
+a perfectly uniform rotating magnetic field. Two problems arise:
++ The field strength varies as the electrical angle advances, instead of remaining constant.
++ The direction of the resulting magnetic field deviates slightly from the target angle.
+
+Both issues disappear at full-step and half-step positions, where the geometry aligns cleanly 
+with the sinusoidal pattern. But at intermediate micro-step positions, the mismatch caused by 
+the 45° pole spacing leads to these unavoidable distortions.
+
+The solution
+------------
+The solution is to decompose the desired magnetic field vector into components along the two 
+stator-pole directions that bracket it—those two directions are always separated by 45°. 
+"""
+
+from math import cos, sin, sqrt, pi
+
+def calculate_currents_geometric(cycle_position):
     """
-    Calculates the current intensity that rotates the stator magnetic field by a given angle.
-    
-    This function assumes a that we are working with a bipolar stepper motor with two phases.
-    Each phase has four windings around four poles, positioned around the stator as follows:
-    Phase A poles: A1 @ 0   , A2 @ 1/2π, A3 @ π   , A4 @ 3/2π 
-    Phase B poles: B1 @ 1/4π, B2 @ 3/4π, B3 @ 5/4π, B4 @ 7/4π
+    Calculate phase currents by decomposing the magnetic field along the directions of the stator poles that bracket it.
 
-    The windings around the poles are such that passing an electric current through the phase 
-    generates alternating magnetic polarities:
-    Positive current through Phase A:  A1 - Nord , A2 - South, A3 - Nord , A4 - South
-    Negative current through Phase A:  A1 - South, A2 - Nord , A3 - South, A4 - Nord
-    Positive current through Phase B:  B1 - Nord , B2 - South, B3 - Nord , B4 - South
-    Negative current through Phase B:  B1 - South, B2 - Nord , B3 - South, B4 - Nord
-
-    We define the reference magnetic configuration as the magnetic field produced by the stator
-    when the poles are oriented as described above and max positive current is flowing through 
-    Phase A, while no current is flowing through Phase B. By cutting the current through Phase A 
-    and passing max positive current through Phase B we rotate the magnetic field clockwise by 45°.
-
-    Imagine having a dial with an arrow, which when pointing upwards corresponds to the stator 
-    generating the reference magnetic field. As we turn this dial, the magnetic field generated by
-    the stator rotates like the dial's arrow. This function implements the behavior of such a dial.
-
-    The current intensity is a expressed as a number between -1.0 and 1.0, where 1.0 means fully
-    energizing the phase in one direction, and -1.0 means fully energizing the phase with the 
-    electric current flowing in the opposite direction. Which direction corresponds to +1.0 and
-    which direction to -1.0 is both arbitrary and irrelevant.
+    See the module docstring for details.
 
     Parameters:
-        theta - the angle by which to rotate the reference magnetic field (clockwise is positive)
-    
-    Returns: 
-        a tuple: (PhaseA current intensity, PhaseB current intensity)
+        cycle_position (float): Position within the electrical cycle, ranging from
+                                0.0 (start) to 1.0 (full cycle).
+                                
+    Returns:
+        tuple: A pair (IA, IB) where:
+               - IA: Current intensity for Phase A (cos wave), range [-1.0, +1.0]
+               - IB: Current intensity for Phase B (sin wave), range [-1.0, +1.0]
     """
 
-    # Since the magnetic field produced by the stator is invariant to rotations
-    # by an angle of N * π, we map the angle of magnetic rotation to [0, π).
-    # Example: rotating the reference field by 195° is the same as rotating it by 15°.
-    
-    theta = theta % pi
-
-    # The angle of rotation is measured clockwise, relative to the vertical,
-    # therefore the [0, π) range encompases the left semi-circle. We divide
-    # this semi-circle into 4 equal sectors:
-    #   Sector 1: [0   , 1/4π)
-    #   Sector 2: [1/4π, 1/2π)
-    #   Sector 3: [1/2π, 3/4π)
-    #   Sector 4: [3/4π, π)
-    # The sector boundaries are the positions of the stator poles (see docstring)
-    
-    sector_sz = pi/4
-
-    # We map the given angle of rotation to a sector and a relative angle within that sector:
-    # Examples:
-    #   theta = 15° => sector 1, theta = 15° 
-    #   theta = 65° => sector 2, theta = 20°
-    #   theta = 90° => sector 3, theta =  0°
-    # This reduces the problem of rotating the field by an angle in [0, π) to that of 
-    # rotating it by an angle in [0, π/4). This is possible since the symmetry of the
-    # stator means that all sectors look the same.
-
-    sector = theta // sector_sz + 1
-    theta  = theta - (sector-1) * sector_sz
+    # Which quarter of the electric cycle are we in.
+    # This determines in between which stator poles is the direction of the magnetic field. 
+    quarter = int(cycle_position * 4) + 1
 
     # Consider two axes that form a 45° angle, and a unit vector whose direction lies between them.
-    # We call an axis the "left axis"  if rotating it 45° clockwise         aligns it with the other given axis.
-    # We call an axis the "right axis" if rotating it 45° counter-clockwise aligns it with the other given axis.
-    # If 'theta' is the angle between the unit vector and the left axis, then its decomposition along the two
-    # axes is:
-    #   left  component = cos(theta) - sin(theta)
-    #   right component = sqrt(2) * sin(theta)
+    # One axis is positioned counter-clockwise, the other one clockwise relative to the unit vector.
+    
+    # If 'theta' is the angle between the unit vector and the ccw axis, then its decomposition along 
+    # the two axes is:
+    #   ccw component = cos(theta) - sin(theta)
+    #   cw  component = sqrt(2) * sin(theta)
     #
-    # This is the situation we face when decomposing the rotated magnetic field along the direction of the two
-    # stator poles that bracket it. This decomposition is useful because we control the intesity of the field
-    # along the direction that connects opposing poles. Setting the field magnitude to 1, its components are:
+    # This is the situation we face when decomposing the rotated magnetic field along the direction of 
+    # the two stator poles that bracket it. This decomposition is useful because we control the intensity 
+    # of the field along the direction that connects opposing poles. Setting the field magnitude to 1, 
+    # its components are:
 
-    B_left  = cos(theta) - sin(theta)
-    B_right = sqrt(2) * sin(theta)
+    position_in_quarter = (cycle_position * 4) % 1.0
+    theta = position_in_quarter * pi / 4
+    
+    B_ccw = cos(theta) - sin(theta)
+    B_cw  = sqrt(2) * sin(theta)
 
     # Below we translate magnetic field intensity to current intensity.
-    # We assume that the magnitude of the magnetic field is proportional with the current intensity and we 
-    # set the proportionality constant to 1. 
-    # Also note the sign of the current: generating the same magnetic field along the A1 - A3 vs A2 - A4 
-    # direction requires flipping the direction of the current through Phase A (as polarities of poles 
-    # A1, A2, A3, A4 alternates).
+    # We are working on units where a full current (intensity 1) generates a full magnetic field.
+    # Note the sign of the current: generating the same magnetic field along the A1 - A3 vs A2 - A4 
+    # direction requires flipping the direction of the current through Phase A (as polarities of 
+    # poles A1, A2, A3, A4 alternates).
     
-    # left  direction: line connecting poles A1 - A3
-    # right direction: line connecting poles B1 - B3        
-    if sector == 1:
-        Ia = +B_left
-        Ib = +B_right
+    # ccw direction: line connecting poles A1 - A3
+    # cw  direction: line connecting poles B1 - B3        
+    if quarter == 1:
+        Ia = +B_ccw
+        Ib = +B_cw
 
-    # left  direction: line connecting poles B1 - B3            
-    # right direction: line connecting poles A2 - A4
-    elif sector == 2:
-        Ia = -B_right 
-        Ib = +B_left
+    # ccw direction: line connecting poles B1 - B3            
+    # cw  direction: line connecting poles A2 - A4
+    elif quarter == 2:
+        Ia = -B_cw 
+        Ib = +B_ccw
 
-    # left  direction: line connecting poles A2 - A4
-    # right direction: line connecting poles B2 - B4            
-    elif sector == 3:
-        Ia = -B_left
-        Ib = -B_right
+    # ccw  direction: line connecting poles A2 - A4
+    # c2 direction: line connecting poles B2 - B4            
+    elif quarter == 3:
+        Ia = -B_ccw
+        Ib = -B_cw
 
     # left  direction: line connecting poles B2 - B4            
     # right direction: line connecting poles A1 - A3
-    elif sector == 4:
-        Ia = +B_right
-        Ib = -B_left
+    elif quarter == 4:
+        Ia = +B_cw
+        Ib = -B_ccw
 
     return Ia, Ib
 
-
 def calculate_currents_sinusoidal(cycle_position):
     """
-    Calculate phase currents using simple sinusoidal interpolation.
+    Calculate phase currents using the sinusoidal approximation.
 
     This function provides a basic sinusoidal waveform for the two motor phases,
     with a 90-degree phase shift between them. This is the standard approach for
     smooth micro-stepping in stepper motors.
+
+    See the module docstring for details.
 
     Parameters:
         cycle_position (float): Position within the electrical cycle, ranging from
@@ -135,6 +180,7 @@ def calculate_currents_sinusoidal(cycle_position):
     """
     theta = 2*pi*cycle_position
     return cos(theta), sin(theta)
+
 
 def calculate_electric_cycle(num_microsteps, current_calculator):
     """
