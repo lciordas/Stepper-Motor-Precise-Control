@@ -8,11 +8,11 @@ This project contains a complete testing framework that allows you to test the s
 stepper/
 ├── src/                       # Source code (for Pico 2)
 │   ├── stepper_motor.py       # Main motor control class
-│   └── rotor_angle.py         # Rotor angle calculations
+│   ├── rotor_angle.py         # Rotor angle calculations
+│   └── electrical_cycle.py    # Electrical cycle calculations for microstepping
 ├── test/                      # Test code (local only)
 │   ├── machine_mock.py        # Mock MicroPython machine module
 │   ├── test_stepper_motor.py  # Unit tests
-│   ├── test_example.py        # Example/demo script
 │   └── conftest.py            # pytest configuration
 └── README_TESTING.md          # This file
 
@@ -37,11 +37,6 @@ python3 -m pytest test/test_stepper_motor.py -v
 ### Run Specific Test Class
 ```bash
 python3 -m pytest test/test_stepper_motor.py::TestSectorRotation -v
-```
-
-### Run Manual Example
-```bash
-python3 test/test_example.py
 ```
 
 ## How It Works
@@ -122,8 +117,7 @@ class TestNewFeature:
         machine_mock.reset_all_tracking()
         self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
 
     @patch('time.sleep')
@@ -140,22 +134,17 @@ class TestNewFeature:
 
 To debug failing tests:
 
-1. **Enable verbose motor output:**
-   ```python
-   motor = StepperMotor(..., verbose=True)
-   ```
-
-2. **Print tracked operations:**
+1. **Print tracked operations:**
    ```python
    machine_mock.print_operations()
    ```
 
-3. **Use pytest's -s flag to see print statements:**
+2. **Use pytest's -s flag to see print statements:**
    ```bash
    python3 -m pytest test_stepper_motor.py -s
    ```
 
-4. **Use pytest's --pdb flag to drop into debugger on failure:**
+3. **Use pytest's --pdb flag to drop into debugger on failure:**
    ```bash
    python3 -m pytest test_stepper_motor.py --pdb
    ```

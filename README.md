@@ -1,14 +1,24 @@
 # Stepper Motor Control Library
 
-A MicroPython library for controlling bipolar stepper motors with microstepping capability.
+A MicroPython library for controlling bipolar stepper motors with arbitrary precission.<br>
+For more details see the following blog posts:
 
-## Features
+**Rethinking Microstepping, Part1: A More Accurate Field-Control Method**<br>
+Why the Standard Microstepping Method Is Only an Approximation — and How to Correct It<br>
+https://medium.com/@22lciordas/rethinking-microstepping-a-more-accurate-field-control-method-845758315e32
 
-- **Full and microstepping control** - Support for both full-step and microstep positioning
-- **Precise angle positioning** - Position the rotor to any angle with high precision
-- **Speed control** - Spin the motor at specified RPM
-- **Direction control** - Clockwise, counter-clockwise, or shortest path
-- **Comprehensive testing** - Full test suite that runs without hardware
+**Rethinking Microstepping, Part 2: Implementing Arbitrary-Resolution Rotor Positioning**<br>
+Turning theory into code: An open-loop MicroPython stepper motor driver for the Raspberry Pi Pico 2<br>
+https://medium.com/@22lciordas/rethinking-microstepping-part-2-implementing-arbitrary-resolution-rotor-positioning-b5f646c5666f
+
+
+## Motor Specifications
+
+The library assumes:
+- **Two-phase bipolar stepper motor with 4 poles per phase** (poles of the same phase are 90° apart; poles of the two phases alternate and are 45° apart)
+- **50 rotor teeth** spaced 7.2° apart
+- **200 steps per revolution** (1.8° per step)
+- **H-bridge driver** (like TB6612FNG) for current control
 
 ## Project Structure
 
@@ -16,52 +26,30 @@ A MicroPython library for controlling bipolar stepper motors with microstepping 
 stepper/
 ├── src/                       # Source code (deploy to Pico 2)
 │   ├── stepper_motor.py       # Main motor control class
-│   └── rotor_angle.py         # Rotor angle calculations
+│   ├── rotor_angle.py         # Rotor angle calculations
+│   └── electrical_cycle.py    # Electrical cycle calculations for microstepping
 ├── test/                      # Test code (local development only)
 │   ├── machine_mock.py        # Mock MicroPython machine module
 │   ├── test_stepper_motor.py  # Unit tests
-│   ├── test_example.py        # Example/demo script
 │   └── conftest.py            # pytest configuration
+├── MicroStepping.ipynb        # Jupyter notebook for microstepping analysis
 ├── README.md                  # This file
 └── README_TESTING.md          # Testing documentation
 ```
 
-## Deployment to Pico 2
+## Usage
 
-### Copying files to your MicroPython device
-
-1. Copy **only** the files from `src/` to your Pico 2:
-   - `stepper_motor.py`
-   - `rotor_angle.py`
-
-2. On your Pico 2, import and use:
+Copy the files from `src/` to your Pico 2, then:
 
 ```python
 from stepper_motor import StepperMotor
 
-# Initialize motor with pin connections
 motor = StepperMotor(
     ain1=0, ain2=1, pwma=2,  # Phase A pins
     bin1=3, bin2=4, pwmb=5,  # Phase B pins
-    verbose=True             # Enable debug logging
+    electric_cycle_calculator="geometric"  # or "sinusoidal"
 )
-```
 
-### Local Development and Testing
-
-For development and testing on your computer (no hardware required):
-
-1. Clone this repository
-2. Install pytest: `pip install pytest`
-3. Run tests: `python3 -m pytest test/ -v`
-
-**Note:** The test files use mocks and should never be copied to your Pico 2.
-
-## Usage Examples
-
-### Basic Positioning
-
-```python
 # Position rotor to 90 degrees
 motor.set_rotor(90.0, "cw")
 
@@ -89,26 +77,25 @@ The motor automatically uses microstepping for precise positioning within sector
 motor.set_rotor(45.5, "cw")
 ```
 
-## Motor Specifications
+Two microstepping calculation methods are available:
 
-The library assumes:
-- **Two-phase bipolar stepper motor**
-- **200 steps per revolution** (1.8° per step)
-- **50 rotor teeth** spaced 7.2° apart
-- **4 poles per phase** spaced 90° apart
-- **H-bridge driver** (like TB6612FNG) for current control
+- **Sinusoidal** (default): Standard approach using sinusoidal current waveforms. Simple and widely used, but introduces slight field magnitude and angle errors at intermediate microstep positions due to the 45° pole spacing in hybrid steppers.
+
+- **Geometric**: Precise method that decomposes the desired magnetic field along the actual stator pole directions. Produces a constant-magnitude rotating field at all microstep positions. See `MicroStepping.ipynb` for a detailed analysis.
 
 ## API Reference
 
 ### StepperMotor Class
 
-#### `__init__(ain1, ain2, pwma, bin1, bin2, pwmb, verbose=False)`
+#### `__init__(ain1, ain2, pwma, bin1, bin2, pwmb, electric_cycle_calculator="sinusoidal")`
 Initialize the motor controller.
 
 **Parameters:**
 - `ain1, ain2, pwma`: Phase A control pins
 - `bin1, bin2, pwmb`: Phase B control pins
-- `verbose`: Enable debug logging
+- `electric_cycle_calculator`: Method for calculating phase currents during microstepping
+  - `"sinusoidal"`: Standard sinusoidal approximation (default)
+  - `"geometric"`: Precise geometric decomposition accounting for 45° pole spacing
 
 #### `set_rotor(target_angle, direction, delay=0.01)`
 Position the rotor to a specific angle.
@@ -137,19 +124,15 @@ Align the rotor to the nearest sector boundary.
 - `is_aligned`: Boolean indicating if rotor is at a sector boundary
 - `aligned_position`: Current aligned position (1-4) or None
 
-## Testing
+## Development
 
-The project includes comprehensive tests that run without hardware:
+For local development and testing (no hardware required):
 
-```bash
-# Run all tests
-python3 -m pytest test/ -v
+1. Clone this repository
+2. Install pytest: `pip install pytest`
+3. Run tests: `python3 -m pytest test/ -v`
 
-# Run example demonstration
-python3 test/test_example.py
-```
-
-See [README_TESTING.md](README_TESTING.md) for detailed testing documentation.
+The test files use mocks and should never be copied to your Pico 2. See [README_TESTING.md](README_TESTING.md) for detailed testing documentation.
 
 ## Hardware Setup
 
@@ -182,7 +165,6 @@ Contributions are welcome! Please ensure all tests pass before submitting pull r
 ### Motor not moving
 - Check power supply voltage and current
 - Verify pin connections
-- Enable verbose mode to see debug output
 
 ### Inaccurate positioning
 - Ensure motor is properly initialized (starts aligned)
