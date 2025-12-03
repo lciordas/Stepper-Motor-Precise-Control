@@ -35,8 +35,7 @@ class TestStepperMotorInitialization:
         """Test that initialization properly sets up all pins and PWM controllers."""
         motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
 
         # Verify pins were created
@@ -55,8 +54,7 @@ class TestStepperMotorInitialization:
         """Test that motor starts with rotor aligned to position 1."""
         motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
 
         # Check initial rotor position
@@ -69,8 +67,7 @@ class TestStepperMotorInitialization:
         """Test that initialization energizes Phase A positively."""
         motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
 
         ops = machine_mock.get_all_operations()
@@ -101,8 +98,7 @@ class TestRotorAlignment:
         machine_mock.reset_all_tracking()
         self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
         machine_mock.reset_all_tracking()  # Reset after initialization
 
@@ -143,8 +139,7 @@ class TestSectorRotation:
         machine_mock.reset_all_tracking()
         self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
 
     @patch('time.sleep')  # Mock sleep to make tests fast
@@ -153,7 +148,7 @@ class TestSectorRotation:
         initial_sector = self.motor.rotor_angle.sector
 
         # Rotate 5 sectors clockwise
-        self.motor._rotate_sectors(5, 0.01, 1)
+        self.motor._rotate_full_steps(5, 0.01, 1)
 
         # Check final position
         expected_sector = (initial_sector + 5 - 1) % RotorAngle.SECTOR_COUNT + 1
@@ -169,7 +164,7 @@ class TestSectorRotation:
         initial_sector = self.motor.rotor_angle.sector
 
         # Rotate 3 sectors counter-clockwise
-        self.motor._rotate_sectors(-3, 0.01, 1)
+        self.motor._rotate_full_steps(-3, 0.01, 1)
 
         # Check final position
         expected_sector = (initial_sector - 3 - 1) % RotorAngle.SECTOR_COUNT + 1
@@ -185,7 +180,7 @@ class TestSectorRotation:
         initial_sector = self.motor.rotor_angle.sector
 
         # Rotate 0 sectors
-        self.motor._rotate_sectors(0, 0.01, 1)
+        self.motor._rotate_full_steps(0, 0.01, 1)
 
         # Position should not change
         assert self.motor.rotor_angle.sector == initial_sector
@@ -201,7 +196,7 @@ class TestSectorRotation:
         mock_sleep.side_effect = [None, None, None, KeyboardInterrupt()]
 
         with pytest.raises(KeyboardInterrupt):
-            self.motor._rotate_sectors(inf, 0.01, 1)
+            self.motor._rotate_full_steps(inf, 0.01, 1)
 
         # Should have rotated at least 3 times before interrupt
         assert mock_sleep.call_count == 4
@@ -215,8 +210,7 @@ class TestMicrostepPositioning:
         machine_mock.reset_all_tracking()
         self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
         machine_mock.reset_all_tracking()
 
@@ -276,13 +270,12 @@ class TestSpinRotor:
         machine_mock.reset_all_tracking()
         self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
 
     @patch('time.sleep')
     @patch.object(StepperMotor, 'align_rotor')
-    @patch.object(StepperMotor, '_rotate_sectors')
+    @patch.object(StepperMotor, '_rotate_full_steps')
     def test_spin_rotor_basic(self, mock_rotate, mock_align, mock_sleep):
         """Test basic spin functionality."""
         # Spin 2.5 revolutions at 60 RPM clockwise
@@ -297,7 +290,7 @@ class TestSpinRotor:
         mock_rotate.assert_called_once_with(500, 0.005, 1)
 
     @patch('time.sleep')
-    @patch.object(StepperMotor, '_rotate_sectors')
+    @patch.object(StepperMotor, '_rotate_full_steps')
     def test_spin_rotor_zero_revolutions(self, mock_rotate, mock_sleep):
         """Test that spinning 0 revolutions works correctly."""
         self.motor.spin_rotor(0, 60, "cw")
@@ -306,7 +299,7 @@ class TestSpinRotor:
         mock_rotate.assert_called_with(0, 0.005, 1)
 
 
-class TestSetRotor:
+class TestTurnRotor:
     """Test arbitrary angle positioning."""
 
     def setup_method(self):
@@ -314,20 +307,19 @@ class TestSetRotor:
         machine_mock.reset_all_tracking()
         self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
 
     @patch('time.sleep')
-    def test_set_rotor_same_angle(self, mock_sleep):
-        """Test that setting to current angle is a no-op."""
+    def test_turn_rotor_same_angle(self, mock_sleep):
+        """Test that turning to current angle is a no-op."""
         current_angle = self.motor.rotor_angle.to_degrees
 
         # Reset tracking
         machine_mock.reset_all_tracking()
 
-        # Set to same angle
-        self.motor.set_rotor(current_angle, "cw")
+        # Turn to same angle
+        self.motor.turn_rotor(current_angle, "cw")
 
         # Should be no operations
         ops = machine_mock.get_all_operations()
@@ -336,20 +328,20 @@ class TestSetRotor:
 
     @patch('time.sleep')
     @patch.object(StepperMotor, 'align_rotor')
-    @patch.object(StepperMotor, '_rotate_sectors')
+    @patch.object(StepperMotor, '_rotate_full_steps')
     @patch.object(StepperMotor, '_rotate_in_sector')
-    def test_set_rotor_different_sector(self, mock_rotate_in, mock_rotate_sectors, mock_align, mock_sleep):
+    def test_turn_rotor_different_sector(self, mock_rotate_in, mock_rotate_full_steps, mock_align, mock_sleep):
         """Test positioning to a different sector."""
         # Position to 45 degrees
-        self.motor.set_rotor(45.0, "cw", delay=0.01)
+        self.motor.turn_rotor(45.0, "cw")
 
         # Should call all three positioning methods
         mock_align.assert_called_once()
-        mock_rotate_sectors.assert_called_once()
+        mock_rotate_full_steps.assert_called_once()
         mock_rotate_in.assert_called_once()
 
     @patch('time.sleep')
-    def test_set_rotor_closest_direction(self, mock_sleep):
+    def test_turn_rotor_closest_direction(self, mock_sleep):
         """Test that 'closest' direction works correctly."""
         # Start at 10 degrees (aligned position)
         self.motor.rotor_angle = RotorAngle.from_degrees(10)
@@ -357,10 +349,10 @@ class TestSetRotor:
         sector = round(10 / 1.8) + 1
         self.motor.rotor_angle = RotorAngle(sector, 0)  # Aligned at sector boundary
 
-        # Set to 350 degrees with "closest" - should go counter-clockwise
+        # Turn to 350 degrees with "closest" - should go counter-clockwise
         with patch.object(self.motor, 'align_rotor') as mock_align:
-            with patch.object(self.motor, '_rotate_sectors'):
-                self.motor.set_rotor(350, "closest")
+            with patch.object(self.motor, '_rotate_full_steps'):
+                self.motor.turn_rotor(350, "closest")
                 # Verify counter-clockwise was chosen (20 degrees ccw vs 340 degrees cw)
                 mock_align.assert_called_with(direction="ccw")
 
@@ -368,10 +360,10 @@ class TestSetRotor:
         sector = round(350 / 1.8) + 1
         self.motor.rotor_angle = RotorAngle(sector % 200 if sector > 200 else sector, 0)
 
-        # Set to 10 degrees with "closest" - should go clockwise
+        # Turn to 10 degrees with "closest" - should go clockwise
         with patch.object(self.motor, 'align_rotor') as mock_align:
-            with patch.object(self.motor, '_rotate_sectors'):
-                self.motor.set_rotor(10, "closest")
+            with patch.object(self.motor, '_rotate_full_steps'):
+                self.motor.turn_rotor(10, "closest")
                 # Verify clockwise was chosen (20 degrees cw vs 340 degrees ccw)
                 mock_align.assert_called_with(direction="cw")
 
@@ -384,8 +376,7 @@ class TestEnergizePhase:
         machine_mock.reset_all_tracking()
         self.motor = StepperMotor(
             ain1=0, ain2=1, pwma=2,
-            bin1=3, bin2=4, pwmb=5,
-            verbose=False
+            bin1=3, bin2=4, pwmb=5
         )
         machine_mock.reset_all_tracking()
 
