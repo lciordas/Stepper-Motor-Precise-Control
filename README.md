@@ -5,7 +5,7 @@ For more details see the following blog posts:
 
 **Rethinking Microstepping, Part1: A More Accurate Field-Control Method**<br>
 Why the Standard Microstepping Method Is Only an Approximation — and How to Correct It<br>
-https://medium.com/@22lciordas/rethinking-microstepping-a-more-accurate-field-control-method-845758315e32
+[https://medium.com/@22lciordas/rethinking-microstepping-a-more-accurate-field-control-method-845758315e32](https://medium.com/@22lciordas/rethinking-microstepping-part-1-a-more-accurate-field-control-method-6987aadaa16e)
 
 **Rethinking Microstepping, Part 2: Implementing Arbitrary-Resolution Rotor Positioning**<br>
 Turning theory into code: An open-loop MicroPython stepper motor driver for the Raspberry Pi Pico 2<br>
